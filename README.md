@@ -19,17 +19,45 @@ So I built my own, mostly by combining a few good open-source projects and point
 
 The repo is public so others can see how it's put together, borrow pieces, or fork it and make their own version.
 
-## What it does
+## What's interesting about it
 
-- **Coach in a conversation.** The home screen is a chat with a coach that reads my log, asks about things that matter (pain, readiness, race dates, missed sessions), and proposes dated sessions, each with a target and a reason.
-- **Plans I explicitly accept.** Nothing lands on my calendar until I press Accept. Changes to accepted sessions keep the original and a dated note explaining why.
-- **Training programs.** I pick a goal and customize days, time budget, and supporting strength, then preview every dated week before committing. Programs include build phases, cutback weeks, tapers, and ultra back-to-backs. A library of 70 original example workouts is also available.
-- **Logging, including lifting.** Runs, rides, and walks, plus strength sessions with exercises, sets, reps or timed holds, and weights.
-- **Imports from anywhere.** A photo of a treadmill or watch screen, or a FIT, GPX, or TCX file, becomes a draft I review and confirm. Optional Intervals.icu sync adds workouts and fitness/fatigue/recovery analysis.
-- **Honest about planned vs. actual.** Logging a workout never marks a planned session done on its own. I say whether it was completed, modified, replaced, or extra, and both the prescription and what really happened are kept.
-- **Guardrails the AI can't bypass.** The API refuses unsafe writes such as back-to-back hard days, big long-run jumps, or hard training with an injury flag, whether they come from me or the model. The model also can't accept plans or confirm imports for me.
+### It runs on my ChatGPT subscription, not an API key
+
+Most AI apps need an API key and a separate pay-per-token bill. Be Better runs the coach through OpenAI's official [Codex app-server](https://learn.chatgpt.com/docs/app-server) on the server machine, so coaching and photo reading use the ChatGPT plan I already pay for.
+
+- **Sign in from the phone.** Settings shows an official device-code link. Codex keeps the credentials in its own isolated directory, and no token ever reaches the browser or the app's database.
+- **Usage limits in Settings.** The app shows the plan's live usage windows along with the model, reasoning effort, and connection status.
+- **One set of tools, any provider.** The coach's tools are ordinary [Vercel AI SDK](https://github.com/vercel/ai) tools, and a small adapter hands them to Codex. The same tools work with an OpenAI or Anthropic API key if I'd rather pay per token.
+
+### A coach that can't go rogue
+
+The model runs locked down. It gets an empty working directory, read-only file access, no network, no shell, and no sub-agents. Its only abilities are the app's own validated tools, like reading the log or proposing a week.
+
+Every write goes through the same server-side service as the UI, with the same guardrails. Back-to-back hard days, a third hard day in a week, long-run jumps over 20 minutes, hard training with an injury flag, and blown taper budgets are all refused, whether I asked for them or the model did. The model can propose, but it can't accept a plan, confirm an import, or sign me up for a program. Those buttons are mine.
+
+### Snap a photo of the treadmill
+
+Not every workout syncs. I take a photo of the treadmill or watch screen, the model reads it into a strict schema, and I get a draft card to check before anything is saved. Uncertain fields are flagged, and the original photo is kept. FIT, GPX, and TCX files go through the same card, and duplicates can attach to an existing workout so nothing counts twice. If the server is unreachable, photos wait in an offline outbox on the phone and upload later.
+
+### Planned vs. actual stays honest
+
+Many apps quietly tick off a planned run when any run shows up that day. Be Better never infers that. After a workout I say whether it was **completed as planned**, **modified**, **replaced**, or **additional**, and the app keeps both the original prescription and what I actually did. Changes to an accepted plan get a dated decision note explaining why, so the history shows what was planned, what happened, and why they differ.
+
+### The training log is the memory
+
+There's no vector database or hidden memory store. Each conversation gets a fresh, bounded summary built from my SQLite log: workouts, plan, preferences, injuries, and dated notes. What the coach knows is exactly what I can see and edit, and threads can be thrown away without losing anything.
+
+### Optional data stays in its lane
+
+Intervals.icu sync adds fitness/fatigue estimates, recovery trends (HRV, resting HR, sleep against my own baseline), and interval detail. These stay separate observations. They never become confirmed workouts or change the plan on their own, and the API key never reaches the browser or the model.
+
+## Everything else
+
+- **Training programs.** Pick a goal, customize days, weekly time budget, and supporting strength, then preview every dated week before committing. Programs include build phases, cutback weeks, tapers, and ultra back-to-backs. A library of 70 original example workouts is also available.
+- **Lifting logs.** Exercises, sets, reps or timed holds, and weights in lb or kg, plus "copy last session."
 - **Exports.** Accepted sessions export to a calendar (ICS), text, FIT workout files, or Zwift ZWO for cycling.
-- **Installable and offline-tolerant.** It's a PWA on my iPhone home screen. Offline, it shows the cached plan and queues photos to upload later.
+- **Installable.** It's a PWA on my iPhone home screen, with a cached read-only view when offline and an **Update now** prompt when I deploy a change.
+- **Works without a model.** A guided mode keeps the forms and basic proposals working before sign-in.
 
 The [user guide](docs/user-guide.md) walks through each screen.
 
@@ -63,10 +91,9 @@ iPhone (installed PWA)        Laptop browser
    SQLite + original photos/files on disk
 ```
 
-- **The training log is the memory.** The coach has no hidden memory store. Each conversation gets a bounded summary built from the SQLite log, so what the coach knows is what I can see and edit.
 - **One write path.** The UI and the model call the same service, so the same validation and guardrails apply to both.
+- **One process, one file.** The API serves the built PWA, the whole log is a single SQLite file next to its original uploads, and a backup is a copy of both.
 - **Single user, no accounts.** It binds to localhost and is reachable only over my private tailnet.
-- **Locked-down coach runtime.** The model gets an empty workspace, no shell, and only the app's validated tools.
 
 The repository layout:
 
