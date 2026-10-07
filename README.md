@@ -98,8 +98,6 @@ Most of this app is other people's good work, glued together:
 - **[Intervals.icu](https://intervals.icu)**: workout sync plus fitness, fatigue, and recovery analysis.
 - **[Hono](https://hono.dev)**, **[SQLite](https://sqlite.org)** via better-sqlite3 and Drizzle, **[React](https://react.dev)**, **[Vite](https://vite.dev)** with vite-plugin-pwa, **[Zod](https://zod.dev)**, and **[Tailscale](https://tailscale.com)**.
 
-[Open-source leverage](docs/research/open-source-leverage.md) is the survey I did before building, including what I deliberately left out and why (mostly AGPL/GPL licensing and Garmin's FIT SDK terms). [Third-party notices](THIRD_PARTY_NOTICES.md) has the license details.
-
 ## How it works
 
 ```text
