@@ -56,6 +56,7 @@ import {
   dayOfWeek,
   formatDistance,
   formatDuration,
+  formatElevation,
   weekStart,
   type AppState,
   type Activity,
@@ -1817,6 +1818,9 @@ function TrainingLog({
                     month: "short",
                     day: "numeric",
                   })}
+                  {activity.elevationGainMetres
+                    ? ` · ↑ ${formatElevation(activity.elevationGainMetres, state.athlete.units)}`
+                    : ""}
                   {activity.feel ? ` · ${activity.feel}` : ""}
                 </span>
                 {activity.planDecision === "additional" ? (

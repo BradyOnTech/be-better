@@ -398,5 +398,21 @@ export function formatDuration(seconds: number): string {
 export function formatDistance(metres: number, units: "mi" | "km"): string {
   return `${(metres / (units === "mi" ? 1609.344 : 1000)).toFixed(1)} ${units}`;
 }
+/** Elevation follows the distance preference: feet with miles, metres with kilometres. */
+export function elevationUnit(units: "mi" | "km"): "ft" | "m" {
+  return units === "mi" ? "ft" : "m";
+}
+export function elevationToMetres(value: number, units: "mi" | "km"): number {
+  return units === "mi" ? value * 0.3048 : value;
+}
+export function elevationFromMetres(
+  metres: number,
+  units: "mi" | "km",
+): number {
+  return Math.round(units === "mi" ? metres / 0.3048 : metres);
+}
+export function formatElevation(metres: number, units: "mi" | "km"): string {
+  return `${elevationFromMetres(metres, units).toLocaleString("en-US")} ${elevationUnit(units)}`;
+}
 
 export * from "./programs.js";

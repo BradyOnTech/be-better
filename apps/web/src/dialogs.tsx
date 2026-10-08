@@ -7,6 +7,9 @@ import {
 } from "react";
 import { X, ArrowUpRight, Check, Footprints, Moon } from "lucide-react";
 import {
+  elevationFromMetres,
+  elevationToMetres,
+  elevationUnit,
   formatDuration,
   sessionStatusLabel,
   type Activity,
@@ -323,6 +326,9 @@ export function LogWorkout({
     const form = new FormData(event.currentTarget);
     setError("");
     setBusy(true);
+    const elevation = form.get("elevation")
+      ? Number(form.get("elevation"))
+      : null;
     const input = {
       ...(activity ?? {}),
       date: String(form.get("date")),
@@ -332,6 +338,14 @@ export function LogWorkout({
         sport !== "strength" && form.get("distance")
           ? Number(form.get("distance")) * (units === "mi" ? 1609.344 : 1000)
           : null,
+      elevationGainMetres:
+        sport === "strength" || elevation === null
+          ? null
+          : activity?.elevationGainMetres != null &&
+              elevation ===
+                elevationFromMetres(activity.elevationGainMetres, units)
+            ? activity.elevationGainMetres
+            : elevationToMetres(elevation, units),
       rpe: form.get("rpe") ? Number(form.get("rpe")) : null,
       intent: sport === "strength" ? "strength" : form.get("intent"),
       title:
@@ -482,8 +496,8 @@ export function LogWorkout({
             </label>
           )}
         </div>
-        <div className="form-row">
-          {sport !== "strength" && (
+        {sport !== "strength" && (
+          <div className="form-row">
             <label>
               Session type
               <select
@@ -503,7 +517,25 @@ export function LogWorkout({
                 <option value="strength">Strength</option>
               </select>
             </label>
-          )}
+            <label>
+              Elevation gain ({elevationUnit(units)})
+              <input
+                type="number"
+                name="elevation"
+                min={0}
+                max={units === "mi" ? 164000 : 50000}
+                step={1}
+                defaultValue={
+                  activity?.elevationGainMetres != null
+                    ? elevationFromMetres(activity.elevationGainMetres, units)
+                    : ""
+                }
+                placeholder="Optional"
+              />
+            </label>
+          </div>
+        )}
+        <div className="form-row">
           <label>
             Effort (RPE 1–10)
             <input

@@ -20,6 +20,9 @@ import {
   type QueuedUpload,
 } from "./outbox.js";
 import {
+  elevationFromMetres,
+  elevationToMetres,
+  elevationUnit,
   formatDuration,
   formatDistance,
   type AppState,
@@ -226,6 +229,7 @@ export function DraftCard({
         : (v.startTime ?? null);
       const optional = (name: string) =>
         form.get(name) ? Number(form.get(name)) : null;
+      const elevation = optional("elevation");
       const activity = {
         ...v,
         date: String(form.get("date")),
@@ -247,7 +251,13 @@ export function DraftCard({
           reviewSport === "bike",
           units,
         ),
-        elevationGainMetres: optional("elevation"),
+        elevationGainMetres:
+          elevation === null
+            ? null
+            : v.elevationGainMetres != null &&
+                elevation === elevationFromMetres(v.elevationGainMetres, units)
+              ? v.elevationGainMetres
+              : elevationToMetres(elevation, units),
       };
       await api(`/activities/${draft.id}/confirm`, {
         operationId: operationId(),
@@ -530,12 +540,17 @@ export function DraftCard({
                 />
               </label>
               <label>
-                Elevation gain (m)
+                Elevation gain ({elevationUnit(units)})
                 <input
                   name="elevation"
                   type="number"
                   min="0"
-                  defaultValue={v.elevationGainMetres ?? ""}
+                  max={units === "mi" ? 164000 : 50000}
+                  defaultValue={
+                    v.elevationGainMetres != null
+                      ? elevationFromMetres(v.elevationGainMetres, units)
+                      : ""
+                  }
                 />
               </label>
             </div>
