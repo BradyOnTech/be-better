@@ -2,10 +2,10 @@
 // the fixed coach shell and composer stay inside the visible part of the page.
 // Standalone iOS apps may shrink the layout viewport with the keyboard too, so
 // keyboard detection compares against the tallest height seen at this width
-// rather than window.innerHeight.
+// rather than window.innerHeight. Focus alone is not enough: iOS can keep the
+// field focused after the keyboard closes, and the tabs must come back then.
 export function bindCoachViewport() {
   const root = document.documentElement;
-  const touch = window.matchMedia("(pointer: coarse)");
   let frame = 0;
   let fullHeight = 0;
   let fullWidth = 0;
@@ -26,7 +26,7 @@ export function bindCoachViewport() {
     root.style.setProperty("--app-top", `${top}px`);
     root.classList.toggle(
       "coach-keyboard-open",
-      unzoomed && typing && (touch.matches || height < fullHeight - 120),
+      unzoomed && typing && height < fullHeight - 120,
     );
   };
   const schedule = () => {

@@ -827,6 +827,15 @@ function CoachApp({
                 >
                   <ThreadPrimitive.Viewport
                     className="thread-viewport"
+                    onClick={(event) => {
+                      // Tapping the conversation dismisses the keyboard.
+                      if (
+                        !(event.target as Element).closest(
+                          "button, a, summary, input, textarea, select",
+                        )
+                      )
+                        inputRef.current?.blur();
+                    }}
                     autoScroll={chat.messages.length > 0}
                     scrollToBottomOnInitialize={chat.messages.length > 0}
                   >
