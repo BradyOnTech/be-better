@@ -13,6 +13,7 @@ import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
   MessagePrimitive,
+  ActionBarPrimitive,
   useAuiState,
   type TextMessagePartProps,
 } from "@assistant-ui/react";
@@ -20,6 +21,7 @@ import Markdown from "react-markdown";
 import { WorkoutEditor } from "./workout-editor.js";
 import { PwaUpdates } from "./pwa.js";
 import { whenAppResumes } from "./app-lifecycle.js";
+import { bindCoachViewport } from "./coach-viewport.js";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -50,6 +52,11 @@ import {
   Flag,
   Dumbbell,
   Library,
+  Flame,
+  History,
+  SquarePen,
+  ArrowDown,
+  Copy,
 } from "lucide-react";
 import {
   addDays,
@@ -63,6 +70,7 @@ import {
   type PlanSession,
   type Race,
   type CoachQuestion,
+  type CoachConversation,
   strengthSummary,
   sessionStatusLabel,
 } from "../../../packages/domain/src/index.js";
@@ -91,18 +99,22 @@ import {
 import { startOutbox } from "./outbox.js";
 import { ProgramsView, ProgramSummary } from "./programs.js";
 import { PlanReviews } from "./plan-review.js";
+import { MotivationView } from "./motivation.js";
 
-type View = "coach" | "week" | "workouts" | "log" | "imports";
+type View = "coach" | "week" | "workouts" | "log" | "motivation" | "imports";
 const viewTitles: Record<View, string> = {
   coach: "Coach",
   week: "My week",
   workouts: "Programs",
   log: "Training log",
+  motivation: "Motivation",
   imports: "Imports",
 };
 interface Bootstrap {
   state: AppState;
   messages: UIMessage[];
+  conversationId: string;
+  conversations: CoachConversation[];
   offline: boolean;
 }
 const dateLabel = (date: string, options: Intl.DateTimeFormatOptions) =>
@@ -121,12 +133,26 @@ export function App() {
     loading.current = true;
     setError("");
     try {
-      const [state, messages] = await Promise.all([
+      const [state, conversations] = await Promise.all([
         api<AppState>("/state"),
-        api<UIMessage[]>("/history"),
+        api<CoachConversation[]>("/conversations"),
       ]);
-      saveSnapshot(state, messages);
-      setBootstrap({ state, messages, offline: false });
+      const savedId =
+        localStorage.getItem("be-better-conversation") || "default";
+      const conversationId = conversations.some((c) => c.id === savedId)
+        ? savedId
+        : "default";
+      const { messages } = await api<{ messages: UIMessage[] }>(
+        `/conversations/${encodeURIComponent(conversationId)}`,
+      );
+      saveSnapshot(state, messages, conversationId, conversations);
+      setBootstrap({
+        state,
+        messages,
+        conversationId,
+        conversations,
+        offline: false,
+      });
       setAuth(false);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -138,6 +164,8 @@ export function App() {
         setBootstrap({
           state: cached.state,
           messages: cached.messages,
+          conversationId: cached.conversationId,
+          conversations: cached.conversations,
           offline: true,
         });
       else
@@ -270,6 +298,16 @@ function CoachApp({
   const [proposalOpen, setProposalOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [input, setInput] = useState("");
+  const [conversation, setConversation] = useState({
+    id: initial.conversationId,
+    messages: initial.messages,
+  });
+  const [conversations, setConversations] = useState(initial.conversations);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [switchingConversation, setSwitchingConversation] = useState(false);
+  const switchingRef = useRef(false);
+  const conversationRef = useRef(conversation.id);
+  conversationRef.current = conversation.id;
   const [actionsOpen, setActionsOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -280,19 +318,8 @@ function CoachApp({
     textarea.style.height = `${Math.min(160, textarea.scrollHeight)}px`;
   }, [input]);
   useEffect(() => {
-    const resize = () =>
-      document.documentElement.style.setProperty(
-        "--app-height",
-        `${window.visualViewport?.scale === 1 ? window.visualViewport.height : window.innerHeight}px`,
-      );
-    resize();
-    window.visualViewport?.addEventListener("resize", resize);
-    window.addEventListener("resize", resize);
-    return () => {
-      window.visualViewport?.removeEventListener("resize", resize);
-      window.removeEventListener("resize", resize);
-    };
-  }, []);
+    if (view === "coach") return bindCoachViewport();
+  }, [view]);
   useEffect(() => {
     if (!actionsOpen) return;
     const close = (event: PointerEvent) => {
@@ -326,6 +353,11 @@ function CoachApp({
       .then(() => refresh())
       .catch(() => {});
   }, [offline, state.sync.configured, refresh]);
+  const refreshConversations = useCallback(async () => {
+    const list = await api<CoachConversation[]>("/conversations");
+    setConversations(list);
+    return list;
+  }, []);
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -333,19 +365,21 @@ function CoachApp({
         fetch: authenticatedFetch,
         prepareSendMessagesRequest: ({ messages }) => ({
           body: {
+            conversationId: conversation.id,
             message: messages.findLast((message) => message.role === "user"),
           },
         }),
       }),
-    [],
+    [conversation.id],
   );
   const chat = useChat({
-    id: "coach",
-    messages: initial.messages,
+    id: conversation.id,
+    messages: conversation.messages,
     transport,
     generateId: () => crypto.randomUUID(),
     onFinish: () => {
       void refresh();
+      void refreshConversations().catch(() => {});
     },
     onError: () => {
       void refresh();
@@ -359,22 +393,47 @@ function CoachApp({
   const reconnect = useCallback(async () => {
     if (reconnecting.current) return;
     reconnecting.current = true;
+    const id = conversation.id;
     try {
       await refresh();
-      if (busyRef.current) return;
+      if (
+        busyRef.current ||
+        switchingRef.current ||
+        conversationRef.current !== id
+      )
+        return;
       try {
-        const messages = await api<UIMessage[]>("/history");
-        if (!busyRef.current) chat.setMessages(messages);
+        const [detail] = await Promise.all([
+          api<{ messages: UIMessage[] }>(
+            `/conversations/${encodeURIComponent(id)}`,
+          ),
+          refreshConversations(),
+        ]);
+        if (
+          !busyRef.current &&
+          !switchingRef.current &&
+          conversationRef.current === id
+        )
+          chat.setMessages(detail.messages);
       } catch {
         /* The state refresh controls the connection indicator. */
       }
     } finally {
       reconnecting.current = false;
     }
-  }, [refresh, chat.setMessages]);
+  }, [refresh, refreshConversations, chat.setMessages, conversation.id]);
   useEffect(() => {
-    if (!offline && !busy) saveSnapshot(state, chat.messages);
-  }, [state, chat.messages, busy, offline]);
+    if (!offline && !busy && !switchingConversation)
+      saveSnapshot(state, chat.messages, conversation.id, conversations);
+  }, [
+    state,
+    chat.messages,
+    busy,
+    offline,
+    switchingConversation,
+    conversation.id,
+    conversations,
+  ]);
   useEffect(() => {
     const wake = () => void reconnect();
     const stop = whenAppResumes(wake);
@@ -405,7 +464,7 @@ function CoachApp({
     return () => clearTimeout(timeout);
   }, [notice]);
   async function send(text: string) {
-    if (busy || offline || !text.trim()) return;
+    if (busy || switchingRef.current || offline || !text.trim()) return;
     setView("coach");
     setInput("");
     chat.clearError();
@@ -413,6 +472,40 @@ function CoachApp({
       await chat.sendMessage({ text });
     } catch {
       /* useChat exposes the retry state. */
+    }
+  }
+  async function openConversation(id?: string) {
+    if (busy || offline || switchingRef.current) return;
+    if (!id && !chat.messages.length) {
+      setInput("");
+      setHistoryOpen(false);
+      inputRef.current?.focus();
+      return;
+    }
+    switchingRef.current = true;
+    setSwitchingConversation(true);
+    try {
+      const selected = id
+        ? { id }
+        : await api<CoachConversation>("/conversations", {
+            operationId: operationId(),
+          });
+      const detail = await api<{ messages: UIMessage[] }>(
+        `/conversations/${encodeURIComponent(selected.id)}`,
+      );
+      await refreshConversations();
+      conversationRef.current = selected.id;
+      localStorage.setItem("be-better-conversation", selected.id);
+      setConversation({ id: selected.id, messages: detail.messages });
+      setInput("");
+      setActionsOpen(false);
+      setHistoryOpen(false);
+      inputRef.current?.blur();
+    } catch (error) {
+      setNotice((error as Error).message);
+    } finally {
+      switchingRef.current = false;
+      setSwitchingConversation(false);
     }
   }
   async function accept(ids: string[]) {
@@ -488,6 +581,24 @@ function CoachApp({
     setImportTarget(null);
     setImportOpen(true);
   };
+  const conversationTitle =
+    conversations.find((item) => item.id === conversation.id)?.title ||
+    "New conversation";
+  const connectionLabel = offline
+    ? "Offline · saved view"
+    : state.coach.mode === "model"
+      ? "Coach connected"
+      : "Guided mode";
+  const lastMessage = chat.messages.at(-1);
+  const thinking =
+    chat.status === "submitted" ||
+    (chat.status === "streaming" &&
+      !(
+        lastMessage?.role === "assistant" &&
+        lastMessage.parts.some(
+          (part) => part.type === "text" && part.text.trim(),
+        )
+      ));
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -526,6 +637,13 @@ function CoachApp({
               Training log
             </NavButton>
             <NavButton
+              icon={<Flame size={19} />}
+              active={view === "motivation"}
+              onClick={() => setView("motivation")}
+            >
+              Motivation
+            </NavButton>
+            <NavButton
               icon={<Inbox size={19} />}
               active={view === "imports"}
               onClick={() => setView("imports")}
@@ -562,9 +680,28 @@ function CoachApp({
 
         <div className="workspace">
           <header className="topbar">
+            {view === "coach" && (
+              <button
+                className="icon-button coach-topbar-button coach-history-button"
+                aria-label="Conversations"
+                onClick={() => setHistoryOpen(true)}
+                disabled={switchingConversation}
+              >
+                <History size={20} />
+              </button>
+            )}
             <div className="mobile-brand">
               <Brand />
             </div>
+            {view === "coach" && (
+              <div className="coach-title">
+                <strong>{conversationTitle}</strong>
+                <span className={offline ? "offline" : ""}>
+                  {offline ? <WifiOff size={11} /> : <i />}
+                  {connectionLabel}
+                </span>
+              </div>
+            )}
             <div className="view-title">
               <h1>{viewTitles[view]}</h1>
               <span>
@@ -578,11 +715,7 @@ function CoachApp({
             <div className="topbar-actions">
               <span className={`connection-status ${offline ? "offline" : ""}`}>
                 {offline ? <WifiOff size={13} /> : <span />}
-                {offline
-                  ? "Offline · saved view"
-                  : state.coach.mode === "model"
-                    ? "Coach connected"
-                    : "Guided mode"}
+                {connectionLabel}
               </span>
               <button
                 className="icon-button mobile-settings"
@@ -594,10 +727,21 @@ function CoachApp({
               {view === "coach" && (
                 <button
                   className="next-up-button"
+                  aria-label="Next up"
                   onClick={() => setPlanOpen(true)}
                 >
                   <CalendarDays size={16} />
-                  Next up
+                  <span>Next up</span>
+                </button>
+              )}
+              {view === "coach" && (
+                <button
+                  className="icon-button coach-topbar-button"
+                  aria-label="New conversation"
+                  onClick={() => void openConversation()}
+                  disabled={busy || offline || switchingConversation}
+                >
+                  <SquarePen size={19} />
                 </button>
               )}
               {view !== "coach" && (
@@ -625,12 +769,27 @@ function CoachApp({
             </div>
           )}
           <main
-            className={`content-grid ${view !== "coach" ? "full-view" : ""}`}
+            className={`content-grid ${view !== "coach" ? "full-view" : ""} ${view === "motivation" ? "motivation-view" : ""}`}
           >
             <section
               className="coach-column"
               style={view === "coach" ? undefined : { display: "none" }}
             >
+              <div className="conversation-controls">
+                <button
+                  onClick={() => void openConversation()}
+                  disabled={busy || offline || switchingConversation}
+                >
+                  <Plus size={17} /> New conversation
+                </button>
+                <button
+                  aria-label="Conversation history"
+                  onClick={() => setHistoryOpen(true)}
+                  disabled={switchingConversation}
+                >
+                  <History size={17} /> Conversations
+                </button>
+              </div>
               {(state.questions.length > 0 ||
                 state.drafts.length > 0 ||
                 state.planReviews?.length > 0) && (
@@ -662,7 +821,10 @@ function CoachApp({
                 </div>
               )}
               <div className="coach-thread">
-                <ThreadPrimitive.Root className="thread-root">
+                <ThreadPrimitive.Root
+                  key={conversation.id}
+                  className="thread-root"
+                >
                   <ThreadPrimitive.Viewport
                     className="thread-viewport"
                     autoScroll={chat.messages.length > 0}
@@ -711,14 +873,22 @@ function CoachApp({
                     <ThreadPrimitive.Messages
                       components={{ UserMessage, AssistantMessage }}
                     />
-                    {busy && (
-                      <div className="thinking">
+                    {thinking && (
+                      <div className="thinking" role="status">
                         <span />
                         <span />
                         <span />
                         <span>Your coach is thinking</span>
                       </div>
                     )}
+                    <ThreadPrimitive.ViewportFooter className="thread-footer">
+                      <ThreadPrimitive.ScrollToBottom
+                        className="scroll-to-bottom"
+                        aria-label="Scroll to latest message"
+                      >
+                        <ArrowDown size={18} />
+                      </ThreadPrimitive.ScrollToBottom>
+                    </ThreadPrimitive.ViewportFooter>
                   </ThreadPrimitive.Viewport>
                 </ThreadPrimitive.Root>
                 {chat.error && (
@@ -757,12 +927,15 @@ function CoachApp({
                     placeholder="Message your coach…"
                     rows={1}
                     maxLength={10000}
-                    disabled={offline}
+                    disabled={offline || switchingConversation}
                     onKeyDown={(event) => {
+                      // Touch keyboards keep Return for new lines, as in
+                      // other chat apps; the send button sends.
                       if (
                         event.key === "Enter" &&
                         !event.shiftKey &&
-                        !event.nativeEvent.isComposing
+                        !event.nativeEvent.isComposing &&
+                        !matchMedia("(pointer: coarse)").matches
                       ) {
                         event.preventDefault();
                         void send(input);
@@ -843,9 +1016,12 @@ function CoachApp({
                       )}
                     </div>
                     <button
+                      className="composer-send"
                       aria-label="Send message"
                       type="submit"
                       disabled={busy || offline || !input.trim()}
+                      // Keep focus in the field so the keyboard stays open.
+                      onMouseDown={(event) => event.preventDefault()}
                     >
                       {busy ? (
                         <LoaderCircle size={18} className="spin" />
@@ -990,6 +1166,22 @@ function CoachApp({
                 disabled={offline}
               />
             )}
+            {view === "motivation" && (
+              <MotivationView
+                state={state}
+                offline={offline}
+                coachReady={state.coach.mode === "model" && !offline && !busy}
+                refresh={refresh}
+                notify={setNotice}
+                askCoach={(message) => void send(message)}
+                logWorkout={() => {
+                  setActivity(undefined);
+                  setLogPreset(undefined);
+                  setModal("log");
+                }}
+                openWeek={() => setView("week")}
+              />
+            )}
           </main>
           <nav className="mobile-navigation" aria-label="Mobile navigation">
             <button
@@ -1021,6 +1213,13 @@ function CoachApp({
               <span>Log</span>
             </button>
             <button
+              className={view === "motivation" ? "active" : ""}
+              onClick={() => setView("motivation")}
+            >
+              <Flame size={20} />
+              <span>Motivation</span>
+            </button>
+            <button
               className={view === "imports" ? "active" : ""}
               onClick={() => setView("imports")}
             >
@@ -1028,10 +1227,6 @@ function CoachApp({
               <span>
                 Imports{state.drafts.length ? ` (${state.drafts.length})` : ""}
               </span>
-            </button>
-            <button onClick={() => setPlanOpen(true)}>
-              <Route size={20} />
-              <span>Next up</span>
             </button>
           </nav>
         </div>
@@ -1058,6 +1253,52 @@ function CoachApp({
               setView("imports");
             }}
           />
+        )}
+        {historyOpen && (
+          <Modal title="Conversations" close={() => setHistoryOpen(false)}>
+            <p className="conversation-help">
+              Start a new topic or pick up an earlier chat. Your training log
+              and plan stay with your coach.
+            </p>
+            <button
+              className="primary-button"
+              onClick={() => void openConversation()}
+              disabled={busy || offline || switchingConversation}
+            >
+              <Plus size={17} /> New conversation
+            </button>
+            {offline && (
+              <p className="form-error">
+                Reconnect to open another conversation.
+              </p>
+            )}
+            <div className="conversation-list">
+              {conversations.map((item) => (
+                <button
+                  key={item.id}
+                  aria-current={
+                    item.id === conversation.id ? "true" : undefined
+                  }
+                  disabled={busy || offline || switchingConversation}
+                  onClick={() => void openConversation(item.id)}
+                >
+                  <MessageCircle size={18} />
+                  <span>
+                    <strong>{item.title}</strong>
+                    <small>
+                      {new Intl.DateTimeFormat("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        timeZone: state.athlete.timezone,
+                      }).format(new Date(item.updatedAt))}{" "}
+                      · {item.messageCount} messages
+                    </small>
+                  </span>
+                  {item.id === conversation.id && <Check size={17} />}
+                </button>
+              ))}
+            </div>
+          </Modal>
         )}
         {importOpen && (
           <ImportPicker
@@ -1321,6 +1562,19 @@ function AssistantMessage() {
       <MessagePrimitive.Content
         components={{ Text: MessageText, tools: { Fallback: HiddenTool } }}
       />
+      <ActionBarPrimitive.Root
+        className="message-actions"
+        hideWhenRunning
+        autohide="never"
+      >
+        <ActionBarPrimitive.Copy
+          className="message-copy"
+          aria-label="Copy message"
+        >
+          <Copy size={15} className="copy-idle" />
+          <Check size={15} className="copy-done" />
+        </ActionBarPrimitive.Copy>
+      </ActionBarPrimitive.Root>
     </MessagePrimitive.Root>
   );
 }
@@ -1547,6 +1801,14 @@ function WeekView({
 }) {
   const [offset, setOffset] = useState(0);
   const from = addDays(state.today, offset * 7);
+  const nextWorkout = state.plan
+    .filter(
+      (session) =>
+        session.date >= state.today &&
+        session.intent !== "rest" &&
+        ["proposed", "accepted"].includes(session.status),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
   const pending = state.plan.filter(
     (session) =>
       session.status === "proposed" &&
@@ -1566,6 +1828,42 @@ function WeekView({
           <Sparkles size={16} />
         </button>
       </div>
+      {nextWorkout && (
+        <button
+          className="next-workout-card"
+          onClick={() => openSession(nextWorkout)}
+          disabled={disabled}
+        >
+          <span className="session-icon">
+            <SessionIcon
+              sport={nextWorkout.sport}
+              intent={nextWorkout.intent}
+            />
+          </span>
+          <span className="next-workout-details">
+            <span className="eyebrow">Next workout</span>
+            <strong>{nextWorkout.title}</strong>
+            <span className="next-workout-meta">
+              <span>
+                {nextWorkout.date === state.today
+                  ? "Today"
+                  : dateLabel(nextWorkout.date, {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                {" · "}
+                {formatDuration(nextWorkout.durationSeconds)} · RPE{" "}
+                {nextWorkout.rpeTarget}
+              </span>
+              <span className={`status ${nextWorkout.status}`}>
+                {sessionStatusLabel(nextWorkout)}
+              </span>
+            </span>
+          </span>
+          <ChevronRight size={18} />
+        </button>
+      )}
       <div className="week-toolbar">
         <h2>
           {dateLabel(from, { month: "long", day: "numeric" })} —{" "}

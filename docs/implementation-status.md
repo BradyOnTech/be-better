@@ -132,3 +132,38 @@ Built-application checks used temporary ports 3002/3003, an isolated SQLite log,
 - Phone layouts at 375 × 812 and 320 × 568 and desktop at 1440 × 900 had no page, program-editor, or review-card horizontal overflow. These are browser checks; no new physical iPhone result is claimed.
 
 Production was backed up before deployment. Build/type checking, formatting, and the 49 existing regression tests pass. Both production `:8444` and compatibility `:8443` health checks return 200. The migration is applied, and hashes of the personal activities, prescriptions, notes, and messages are unchanged by deployment. Verification data remains in ignored local artifacts, separate from the personal log.
+
+## Elevation logging and the Motivation deck — October 8
+
+Manual workout entries record optional elevation gain in feet when the distance unit is miles and in metres when it is kilometres, always stored in metres. The training log shows the gain beside the date, and import review uses the same unit preference. Saving an untouched value keeps the stored metres exactly.
+
+**Motivation** is a new screen: 37 original cards in six themes, each with a "Now what?" back; the athlete's own cards; kept cards; receipts computed from every confirmed activity; and lock-screen images drawn on the device. Cards and keeps live in two new tables (migration `005_motivation.sql`) behind validated, idempotent service writes. Receipts read confirmed activities only, so drafts and Intervals observations never count. Motivation data is left out of the coach's context and training-context tool; **Ask my coach** sends a card only as an explicit chat message. No card action writes the plan or log.
+
+Built-app checks used an isolated SQLite log and a temporary `:8459` origin:
+
+- Six verification workouts produced the expected receipts: longest session 2h 15m (13.1 mi), biggest climb 2,690 ft, hardest effort RPE 9, a four-week streak including the current week, 5,404 ft total climb (19% of Everest), and six-session totals.
+- On a 390 × 844 phone, the actual UI flipped cards, moved between cards with the keyboard, filtered themes and receipts, kept a card, wrote a card, edited its text, highlights, and color, and deleted it after confirmation. Deleting also removed its keep. The server state matched each step, and the six workouts were unchanged.
+- A lock-screen image rendered at 1170 × 2532 through the download fallback. The native share sheet and a live **Ask my coach** turn were not exercised.
+- Every card face, front and back, was measured in All, Receipts, and Yours at 320 × 568, 375 × 667, 390 × 844, 430 × 932, 768 × 1024, 1280 × 720, 1366 × 768, and 1440 × 900, including a 160-character card with a 390-character back. No face clipped and no page overflowed horizontally. Card text scales with the card's height as well as its width, so short desktop windows stay readable; only that 390-character back scrolls inside its card, at 320 × 568. The seven-item phone navigation stays legible at 320 px. These are browser checks; no new physical iPhone result is claimed.
+
+The personal log was backed up before deployment, then the migration applied on restart with the new tables empty. Hashes of the personal activities, prescriptions, notes, messages, races, programs, and athlete settings are unchanged by deployment. Both production origins (`:8443` and `:8444`) return 200. Build/type checking, formatting, and 57 regression tests pass.
+
+## Workout confirmation feedback — October 10
+
+A photo draft without a workout date could leave **Confirm workout** looking unresponsive: browser validation blocked submission before the API was called, with no persistent explanation in the review card. The review now puts an accessible message beside the first missing or invalid field, focuses and scrolls to it, and opens device details when the invalid field is inside that collapsed section. Dates still require an explicit athlete choice; confirmation never supplies a date automatically.
+
+The built PWA was checked at 390 × 844 against an isolated SQLite log on temporary port 3097. Before the change, confirming a synthetic photo draft with no date left the dialog open, made zero confirmation requests, and showed no inline alert. After applying the PWA's **Update now**, the same scenario displayed the date instruction in view and focused the date input without writing an activity. An out-of-range heart rate inside closed device details opened the section and showed its correction message. Correcting the fields sent one confirmation request, saved one activity, removed the draft, and closed the dialog. These are browser regression checks; no physical iPhone result is claimed.
+
+## Coach web search follow-up
+
+On 2026-10-10, the reported race-link refusal reproduced against the actual subscription runtime: no web request was made because both the runtime configuration and developer instructions disabled search. Built-in live web search is now enabled, and the coach attempts supplied URLs, cites public sources, checks the event year, and reports actual access failures. The existing restricted filesystem profile, denied command network access, disabled shell/agent/app tools, and `project_doc_max_bytes=0` remain in place.
+
+A subprocess protocol regression verifies the launched search setting, coaching instructions, and unchanged permissions. The original live probe completed web searches after the fix. A built-PWA browser check against a separate verification log returned sourced race and course details, explicitly noting that the organizer page timed out and the information came from indexed content. The lookup left workouts, plans, and saved races empty. All 59 tests, typechecking, formatting checks for the changed files, and the production build passed. The running LaunchAgent was restarted for deployment; no test messages were written to the personal log.
+
+## Coach keyboard and conversations follow-up
+
+On 2026-10-10, a browser reproduction of the iPhone keyboard's viewport resize and pan placed the composer outside the visible screen. The coach now uses a fixed shell that follows both visual-viewport height and offset, listens for viewport scroll as well as resize, and temporarily hides navigation and secondary controls while typing. A reusable Playwright check failed against the earlier build and passed after the fix for viewport resizing, panning, a 280-pixel keyboard viewport, and restoration after closing the keyboard. This is a simulated keyboard check, not a physical iPhone test.
+
+Coach now offers **New conversation** and **Conversations**. Histories are stored and supplied to the model per conversation; the existing chat migrates to **Earlier conversation**, and training data and saved preferences remain shared. The selected chat persists per device and in the offline snapshot. Regression tests cover migration with existing messages and completed-turn replay, conversation separation, model context, idempotent creation, and message-ID conflicts without blocking later chat.
+
+The built PWA passed new-chat, history-switching, selected-chat reload, offline reopening, reconnection, mobile overflow, desktop layout, and navigation scroll-restoration checks against a separate SQLite log and synthetic runtime. Both test conversations retained their own two messages; the test log contained no workouts or planned sessions. All 64 tests, typechecking, formatting checks for changed files, and the production build passed. Test messages never entered the personal log.

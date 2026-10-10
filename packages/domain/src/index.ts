@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { IntervalsAnalysis } from "./analysis.js";
 import { strengthExerciseSchema } from "./strength.js";
 import type { TrainingProgram, ProgramProgress } from "./training-program.js";
+import type { MotivationState } from "./motivation.js";
 export * from "./training-program.js";
 export * from "./strength.js";
 export type * from "./analysis.js";
@@ -342,6 +343,7 @@ export interface AppState {
     loadEstimated: boolean;
   };
   coach: { mode: "guided" | "model"; model: string | null };
+  motivation: MotivationState;
 }
 
 export class DomainError extends Error {
@@ -416,3 +418,5 @@ export function formatElevation(metres: number, units: "mi" | "km"): string {
 }
 
 export * from "./programs.js";
+export * from "./motivation.js";
+export type * from "./conversation.js";

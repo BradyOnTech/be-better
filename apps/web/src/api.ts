@@ -1,6 +1,12 @@
 import type { UIMessage } from "ai";
-import type { AppState } from "../../../packages/domain/src/index.js";
-import { athleteSchema } from "../../../packages/domain/src/index.js";
+import type {
+  AppState,
+  CoachConversation,
+} from "../../../packages/domain/src/index.js";
+import {
+  athleteSchema,
+  emptyMotivation,
+} from "../../../packages/domain/src/index.js";
 
 export function readToken() {
   return localStorage.getItem("be-better-token") || "";
@@ -51,6 +57,8 @@ export function operationId() {
 export interface Snapshot {
   state: AppState;
   messages: UIMessage[];
+  conversationId: string;
+  conversations: CoachConversation[];
   savedAt: string;
 }
 export function readSnapshot(): Snapshot | null {
@@ -59,6 +67,8 @@ export function readSnapshot(): Snapshot | null {
       localStorage.getItem("be-better-snapshot") || "null",
     );
     if (!snapshot?.state) return null;
+    snapshot.conversationId ??= "default";
+    snapshot.conversations ??= [];
     snapshot.state = {
       program: null,
       programProgress: null,
@@ -68,6 +78,7 @@ export function readSnapshot(): Snapshot | null {
       blocks: [],
       block: null,
       questions: [],
+      motivation: emptyMotivation,
       sync: {
         provider: "intervals",
         configured: false,
@@ -82,11 +93,22 @@ export function readSnapshot(): Snapshot | null {
     return null;
   }
 }
-export function saveSnapshot(state: AppState, messages: UIMessage[]) {
+export function saveSnapshot(
+  state: AppState,
+  messages: UIMessage[],
+  conversationId = "default",
+  conversations: CoachConversation[] = [],
+) {
   try {
     localStorage.setItem(
       "be-better-snapshot",
-      JSON.stringify({ state, messages, savedAt: new Date().toISOString() }),
+      JSON.stringify({
+        state,
+        messages,
+        conversationId,
+        conversations,
+        savedAt: new Date().toISOString(),
+      }),
     );
   } catch {
     /* Server data remains authoritative if browser storage is full. */

@@ -75,7 +75,7 @@ export function Modal({
     </dialog>
   );
 }
-function ErrorLine({ error }: { error: string }) {
+export function ErrorLine({ error }: { error: string }) {
   return error ? (
     <p className="form-error" role="alert">
       {error}

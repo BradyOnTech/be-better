@@ -37,6 +37,7 @@ export const tables = {
   }),
   messages: sqliteTable("messages", {
     id: text().primaryKey(),
+    conversationId: text("conversation_id").notNull().default("default"),
     sequence: integer().notNull(),
     data: text({ mode: "json" }).$type<UIMessage>().notNull(),
   }),

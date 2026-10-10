@@ -34,6 +34,8 @@ import { tables, type CoachDatabase } from "./db.js";
 import { validatePlan } from "./guardrails.js";
 import { IntervalsAnalysisStore } from "./intervals-analysis.js";
 import { TrainingPrograms } from "./training-programs.js";
+import { MotivationStore } from "./motivation.js";
+import { ConversationStore } from "./conversations.js";
 
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -48,6 +50,8 @@ export function canonical(value: unknown): string {
 export class CoachService {
   public analysis: IntervalsAnalysisStore;
   public programs: TrainingPrograms;
+  public motivation: MotivationStore;
+  public conversations: ConversationStore;
   constructor(
     public database: CoachDatabase,
     public now: () => Date = () => new Date(),
@@ -55,6 +59,8 @@ export class CoachService {
   ) {
     this.analysis = new IntervalsAnalysisStore(this);
     this.programs = new TrainingPrograms(this);
+    this.motivation = new MotivationStore(this);
+    this.conversations = new ConversationStore(this);
     const athlete = athleteSchema.parse({
       id: "athlete",
       name: "",
@@ -114,37 +120,11 @@ export class CoachService {
       .all()
       .map((row) => row.data);
   }
-  messages(): UIMessage[] {
-    return this.database.db
-      .select()
-      .from(tables.messages)
-      .orderBy(desc(tables.messages.sequence))
-      .limit(100)
-      .all()
-      .reverse()
-      .map((row) => row.data);
+  messages(conversationId = "default"): UIMessage[] {
+    return this.conversations.messages(conversationId);
   }
-  saveMessage(message: UIMessage) {
-    const existing = this.database.db
-      .select()
-      .from(tables.messages)
-      .where(eq(tables.messages.id, message.id))
-      .get();
-    const sequence =
-      existing?.sequence ??
-      (this.database.db
-        .select()
-        .from(tables.messages)
-        .orderBy(desc(tables.messages.sequence))
-        .get()?.sequence ?? 0) + 1;
-    this.database.db
-      .insert(tables.messages)
-      .values({ id: message.id, sequence, data: message })
-      .onConflictDoUpdate({
-        target: tables.messages.id,
-        set: { data: message },
-      })
-      .run();
+  saveMessage(message: UIMessage, conversationId = "default") {
+    this.conversations.saveMessage(message, conversationId);
   }
   activityLoad(activity: Activity): number {
     const intentWeight =
@@ -203,6 +183,7 @@ export class CoachService {
       sync: this.syncState(),
       analysis: this.analysis.summary(),
       coach: this.mode,
+      motivation: this.motivation.state(),
       stats: {
         weeklySeconds: week.reduce(
           (sum, activity) => sum + activity.durationSeconds,

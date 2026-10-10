@@ -102,6 +102,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         threadId = p.threadId,
         thread = threads.get(threadId);
       result({ turn: { id: turnId, status: "inProgress" } });
+      if (process.env.CODEX_FIXTURE_INSPECT_RUNTIME === "1") {
+        text(
+          threadId,
+          turnId,
+          JSON.stringify({ args: process.argv.slice(2), thread, turn: p }),
+        );
+        break;
+      }
       let context = {};
       try {
         context = JSON.parse(

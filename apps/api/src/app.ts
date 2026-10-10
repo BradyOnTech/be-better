@@ -25,6 +25,7 @@ import { calendar, workoutFit, workoutZwo } from "./exports.js";
 const idSchema = z.string().min(1).max(200);
 const operationSchema = z.object({ operationId: idSchema });
 const chatSchema = z.object({
+  conversationId: idSchema.default("default"),
   message: z.object({
     id: idSchema,
     role: z.literal("user"),
@@ -202,6 +203,39 @@ export function createApp(
     const body = operationSchema.parse(await c.req.json());
     return c.json(service.deleteRace(c.req.param("id"), body.operationId));
   });
+  app.post("/api/motivation/cards", async (c) => {
+    const body = await c.req.json();
+    return c.json(
+      service.motivation.saveCard(
+        body.card,
+        null,
+        operationSchema.parse(body).operationId,
+      ),
+      201,
+    );
+  });
+  app.patch("/api/motivation/cards/:id", async (c) => {
+    const body = await c.req.json();
+    return c.json(
+      service.motivation.saveCard(
+        body.card,
+        c.req.param("id"),
+        operationSchema.parse(body).operationId,
+      ),
+    );
+  });
+  app.delete("/api/motivation/cards/:id", async (c) => {
+    const body = operationSchema.parse(await c.req.json());
+    return c.json(
+      service.motivation.deleteCard(c.req.param("id"), body.operationId),
+    );
+  });
+  app.post("/api/motivation/keeps", async (c) => {
+    const body = await c.req.json();
+    return c.json(
+      service.motivation.keep(body, operationSchema.parse(body).operationId),
+    );
+  });
   app.post("/api/questions/:id/answer", async (c) => {
     const body = await c.req.json();
     return c.json(
@@ -331,7 +365,21 @@ export function createApp(
   app.post("/api/subscription/logout", async (c) =>
     c.json(await subscription.logout()),
   );
-  app.get("/api/history", (c) => c.json(service.messages()));
+  app.get("/api/history", (c) =>
+    c.json(service.messages(c.req.query("conversationId") || "default")),
+  );
+  app.get("/api/conversations", (c) => c.json(service.conversations.list()));
+  app.post("/api/conversations", async (c) => {
+    const { operationId } = operationSchema.parse(await c.req.json());
+    return c.json(service.conversations.create(operationId));
+  });
+  app.get("/api/conversations/:id", (c) => {
+    const id = c.req.param("id");
+    return c.json({
+      conversation: service.conversations.get(id),
+      messages: service.messages(id),
+    });
+  });
   app.get("/api/athlete", (c) => c.json(service.athlete()));
   app.patch("/api/athlete", async (c) => {
     const body = await c.req.json();
@@ -502,7 +550,8 @@ export function createApp(
     };
   }
   app.post("/api/chat", async (c) => {
-    const { message } = chatSchema.parse(await c.req.json());
+    const { message, conversationId } = chatSchema.parse(await c.req.json());
+    service.conversations.get(conversationId);
     const text = message.parts
       .map((part) => part.text)
       .join("\n")
@@ -512,9 +561,17 @@ export function createApp(
     const previous = service.database.sqlite
       .prepare("SELECT * FROM turns WHERE id = ?")
       .get(message.id) as
-      | { text: string; status: string; response_id: string }
+      | {
+          text: string;
+          status: string;
+          response_id: string;
+          conversation_id: string;
+        }
       | undefined;
-    if (previous && previous.text !== text)
+    if (
+      previous &&
+      (previous.text !== text || previous.conversation_id !== conversationId)
+    )
       throw new DomainError(
         "CONFLICT",
         "This message ID was already used.",
@@ -522,7 +579,7 @@ export function createApp(
       );
     if (previous?.status === "done") {
       const response = service
-        .messages()
+        .messages(conversationId)
         .find((saved) => saved.id === previous.response_id);
       if (response) return replay(response);
       throw new DomainError(
@@ -537,14 +594,22 @@ export function createApp(
         "The coach is finishing another message. Try again in a moment.",
         409,
       );
-    runningTurn = message.id;
-    service.saveMessage(message);
     const responseId = previous?.response_id || randomUUID();
-    service.database.sqlite
-      .prepare(
-        "INSERT INTO turns (id, text, status, response_id, updated_at) VALUES (?, ?, 'running', ?, ?) ON CONFLICT(id) DO UPDATE SET status = 'running', updated_at = excluded.updated_at",
-      )
-      .run(message.id, text, responseId, service.now().toISOString());
+    service.database.sqlite.transaction(() => {
+      service.saveMessage(message, conversationId);
+      service.database.sqlite
+        .prepare(
+          "INSERT INTO turns (id, text, status, response_id, updated_at, conversation_id) VALUES (?, ?, 'running', ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = 'running', updated_at = excluded.updated_at",
+        )
+        .run(
+          message.id,
+          text,
+          responseId,
+          service.now().toISOString(),
+          conversationId,
+        );
+    })();
+    runningTurn = message.id;
     const finish = (status: string) => {
       service.database.sqlite
         .prepare("UPDATE turns SET status = ?, updated_at = ? WHERE id = ?")
@@ -555,7 +620,7 @@ export function createApp(
       if (service.mode.mode === "guided") {
         const reply = guidedReply(service, text, message.id);
         const response = guidedMessage(responseId, reply.text, reply.actions);
-        service.saveMessage(response);
+        service.saveMessage(response, conversationId);
         finish("done");
         return replay(response);
       }
@@ -571,7 +636,7 @@ export function createApp(
       if (analysisDeadline) clearTimeout(analysisDeadline);
       const result = await streamCoach(
         service,
-        service.messages(),
+        service.messages(conversationId),
         message.id,
         model,
       );
@@ -579,7 +644,7 @@ export function createApp(
         stream: result.stream,
         sendReasoning: false,
         generateMessageId: () => responseId,
-        originalMessages: service.messages(),
+        originalMessages: service.messages(conversationId),
         onError: (error) => {
           console.error(
             "Coach generation failed:",
@@ -588,7 +653,7 @@ export function createApp(
           return "The model connection failed. Your saved changes are safe. Retry this message.";
         },
         onEnd: ({ responseMessage, outcome }) => {
-          service.saveMessage(responseMessage);
+          service.saveMessage(responseMessage, conversationId);
           finish(outcome.status === "completed" ? "done" : "interrupted");
         },
       });

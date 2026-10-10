@@ -27,5 +27,13 @@ _Avoid_: Automatic match
 **Plan review**:
 A pending choice about whether a logged activity fulfilled, modified, replaced, or was additional to a planned session.
 
+**Motivation card**:
+A line for the athlete to read, from the built-in deck or written by the athlete, with an optional "Now what?" action on its back. Reading, keeping, or writing cards never changes the plan or the log.
+_Avoid_: Quote, note
+
+**Receipt**:
+A motivation card computed from confirmed activities, such as the longest session or a weekly streak. Drafts and Intervals observations never count.
+_Avoid_: Achievement, badge
+
 **Decision note**:
 A dated explanation preserving the reason for a change to an accepted plan or a session outcome.

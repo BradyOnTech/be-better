@@ -22,7 +22,7 @@ Open **Settings → Connections → Sign in with ChatGPT**. The default device s
 
 Coaching and photo parsing use the official local [Codex app-server](https://learn.chatgpt.com/docs/app-server), with **GPT-6.1 Sol** and **low reasoning effort** by default. `CODEX_MODEL` selects the subscription model; reasoning effort is set in the server connection. Codex is pinned to **0.160.1** in the lockfile. It manages credentials under `~/.be-better/codex` (override with `BE_BETTER_CODEX_HOME`). Be Better does not read OAuth tokens or send them to the PWA. Your ChatGPT plan's limits apply, and no OpenAI API key is needed for this path. Settings shows the configured model and effort, account status, usage windows, and runtime diagnostics.
 
-The coach runtime uses an empty working directory, restricted read-only access, disabled shell and child-agent tools, and only the application's validated tools. Repository instruction loading is disabled (`project_doc_max_bytes=0`), so development instructions such as `AGENTS.md` never reach the coach.
+The coach runtime uses an empty working directory, restricted read-only access, disabled shell and child-agent tools, and the application's validated tools. Built-in live web search lets it read public race pages and other current information, with source links. Command network access remains denied; web content cannot authorize changes to the plan or log. Repository instruction loading is disabled (`project_doc_max_bytes=0`), so development instructions such as `AGENTS.md` never reach the coach.
 
 ### API providers (optional)
 

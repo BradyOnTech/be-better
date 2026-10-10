@@ -80,6 +80,7 @@ There's no vector database or hidden memory store. Each conversation gets a fres
 ## Everything else
 
 - **Training programs.** Pick a goal, customize days, weekly time budget, and supporting strength, then preview every dated week before committing. Programs include build phases, cutback weeks, tapers, and ultra back-to-backs. A library of 70 original example workouts is also available.
+- **Motivation deck.** Swipeable cards with a "Now what?" on the back, receipts built from my own log (longest session, biggest climb, streaks), lines I write myself, and lock-screen images.
 - **Lifting logs.** Exercises, sets, reps or timed holds, and weights in lb or kg, plus "copy last session."
 - **Exports.** Accepted sessions export to a calendar (ICS), text, FIT workout files, or Zwift ZWO for cycling.
 - **Installable.** It's a PWA on my iPhone home screen, with a cached read-only view when offline and an **Update now** prompt when I deploy a change.

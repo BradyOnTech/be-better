@@ -213,6 +213,46 @@ export function DraftCard({
   );
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [validationError, setValidationError] = useState<{
+    field: string;
+    message: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!validationError) return;
+    const field = formRef.current?.elements.namedItem(validationError.field);
+    if (!(field instanceof HTMLElement)) return;
+    const details = field.closest("details");
+    if (details) details.open = true;
+    field.focus({ preventScroll: true });
+    (field.closest("label") ?? field).scrollIntoView({ block: "center" });
+  }, [validationError]);
+  const validation = (name: string) =>
+    validationError?.field === name ? (
+      <small role="alert" className="form-error">
+        {validationError.message}
+      </small>
+    ) : null;
+  function invalid(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const field = event.currentTarget.querySelector<
+      HTMLInputElement | HTMLSelectElement
+    >(":invalid");
+    if (!field || event.target !== field) return;
+    const missing: Record<string, string> = {
+      date: "Choose the date you did this workout before confirming.",
+      sport: "Choose a sport before confirming.",
+      duration: "Enter the workout duration before confirming.",
+    };
+    const label =
+      field.labels?.[0]?.firstChild?.textContent?.trim() ?? field.name;
+    setValidationError({
+      field: field.name,
+      message:
+        (field.validity.valueMissing && missing[field.name]) ||
+        `Check ${label.toLowerCase()}: ${field.validationMessage}`,
+    });
+  }
   const [mergeId, setMergeId] = useState(draft.duplicateIds[0] ?? "");
   const uncertain = (field: string) =>
     draft.uncertainFields.includes(field) ? (
@@ -220,6 +260,7 @@ export function DraftCard({
     ) : null;
   async function confirm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setValidationError(null);
     const form = new FormData(event.currentTarget);
     setBusy(true);
     setError("");
@@ -350,7 +391,21 @@ export function DraftCard({
             </div>
           )}
         </div>
-        <form className="form-grid" onSubmit={confirm}>
+        <form
+          ref={formRef}
+          className="form-grid"
+          onSubmit={confirm}
+          onInvalid={invalid}
+          onChange={(event) => {
+            const field = event.target;
+            if (
+              (field instanceof HTMLInputElement ||
+                field instanceof HTMLSelectElement) &&
+              field.name === validationError?.field
+            )
+              setValidationError(null);
+          }}
+        >
           <div className="form-row">
             <label>
               Sport
@@ -386,6 +441,7 @@ export function DraftCard({
                 )}
               </select>
               {uncertain("sport")}
+              {validation("sport")}
             </label>
             <label>
               Date
@@ -397,6 +453,7 @@ export function DraftCard({
                 required
               />
               {uncertain("date")}
+              {validation("date")}
             </label>
           </div>
           <div className="form-row">
@@ -412,6 +469,7 @@ export function DraftCard({
                 defaultValue={v.durationSeconds ? v.durationSeconds / 60 : ""}
               />
               {uncertain("durationSeconds")}
+              {validation("duration")}
             </label>
             <label>
               Distance ({units})
@@ -431,6 +489,7 @@ export function DraftCard({
                 }
               />
               {uncertain("distanceMetres")}
+              {validation("distance")}
             </label>
           </div>
           <label>
@@ -451,6 +510,7 @@ export function DraftCard({
               duration. For pace, 8:30 is 8.5 minutes.
             </small>
             {uncertain("averageSpeedMetresPerSecond")}
+            {validation("averageRate")}
           </label>
           <div className="form-row">
             <label>
@@ -482,6 +542,7 @@ export function DraftCard({
                 defaultValue={v.rpe ?? ""}
                 placeholder="How did it feel?"
               />
+              {validation("rpe")}
             </label>
           </div>
           <details className="more-fields">
@@ -505,6 +566,7 @@ export function DraftCard({
                     : ""
                 }
               />
+              {validation("time")}
             </label>
             <div className="form-row">
               <label>
@@ -516,6 +578,7 @@ export function DraftCard({
                   max="250"
                   defaultValue={v.averageHeartRate ?? ""}
                 />
+                {validation("hr")}
               </label>
               <label>
                 Max heart rate
@@ -526,6 +589,7 @@ export function DraftCard({
                   max="250"
                   defaultValue={v.maxHeartRate ?? ""}
                 />
+                {validation("maxHr")}
               </label>
             </div>
             <div className="form-row">
@@ -538,6 +602,7 @@ export function DraftCard({
                   max="5000"
                   defaultValue={v.averagePower ?? ""}
                 />
+                {validation("power")}
               </label>
               <label>
                 Elevation gain ({elevationUnit(units)})
@@ -552,16 +617,19 @@ export function DraftCard({
                       : ""
                   }
                 />
+                {validation("elevation")}
               </label>
             </div>
           </details>
           <label>
             How did it feel?
             <input name="feel" defaultValue={v.feel ?? ""} maxLength={500} />
+            {validation("feel")}
           </label>
           <label>
             Any pain?
             <input name="pain" defaultValue={v.pain ?? ""} maxLength={500} />
+            {validation("pain")}
           </label>
           {draft.duplicateIds.length > 0 && (
             <div className="duplicate-card">
