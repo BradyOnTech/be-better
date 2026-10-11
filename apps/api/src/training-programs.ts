@@ -1,3 +1,4 @@
+import { progressWeeks } from "./progression.js";
 import { randomUUID, createHash } from "node:crypto";
 import {
   addDays,
@@ -119,7 +120,7 @@ export class TrainingPrograms {
     const warnings: string[] = [];
     if (base < choice.weeklyMinutes)
       warnings.push(
-        `The first week is capped at ${Math.round(base)} minutes from your current training and availability. Your chosen ${choice.weeklyMinutes} minutes is a time budget.`,
+        `Week one starts near your current ${Math.round(base)} minutes and builds toward your chosen ${choice.weeklyMinutes} minutes, about 10% a week with easier weeks.`,
       );
     if (pattern.weeklyMinutes && base < pattern.weeklyMinutes.low)
       warnings.push(
@@ -142,7 +143,7 @@ export class TrainingPrograms {
         "The goal day stays open for your event. Days after it are recovery days; review your return to training with the coach.",
       );
     warnings.push(
-      "Later weeks are a conservative starting schedule. Future long runs stay within your current baseline; review progression with your coach as new training is logged.",
+      "Long runs grow by at most about 15 minutes a week from your current longest. Review progress with your coach as training is logged.",
     );
     const ready =
       athlete.readiness &&
@@ -167,22 +168,31 @@ export class TrainingPrograms {
         : pattern.sports.includes("trail")
           ? "trail"
           : "run";
+    const frames = Array.from({ length: choice.weeks }, (_, index) =>
+      programWeekShape(choice, index, pattern.phases),
+    );
+    const longTemplate = (exampleWorkouts[pattern.id] ?? []).find(
+      (w) => w.intent === "long",
+    );
+    const loads = progressWeeks(frames, {
+      weeklyMinutes: base,
+      longestMinutes: query.longestMinutes ?? 0,
+      peakWeeklyMinutes: choice.weeklyMinutes,
+      peakLongMinutes:
+        longTemplate?.minutes.high ?? (query.longestMinutes ?? 0) + 30,
+      availableMinutes: athlete.availableHours
+        ? athlete.availableHours * 60
+        : undefined,
+      backToBack: exampleWorkouts[pattern.id]?.some(
+        (w) => w.intent === "back-to-back",
+      ),
+      ultra: pattern.events.includes("ultra"),
+    });
     for (let index = 0; index < choice.weeks; index++) {
       const start = addDays(choice.startDate, index * 7);
-      const { phase, cutback, daysOut } = programWeekShape(
-        choice,
-        index,
-        pattern.phases,
-      );
-      const factor =
-        phase === "taper"
-          ? daysOut <= 6
-            ? 0.5
-            : 0.7
-          : cutback
-            ? 0.8
-            : Math.min(1.15, 1 + index * 0.03);
-      const budget = Math.round(Math.min(choice.weeklyMinutes, base * factor));
+      const { phase, cutback } = frames[index];
+      const load = loads[index];
+      const budget = Math.min(choice.weeklyMinutes, load.weeklyMinutes);
       const templates = (exampleWorkouts[pattern.id] ?? []).filter(
         (w) =>
           w.phases.includes(phase) &&
@@ -247,9 +257,15 @@ export class TrainingPrograms {
           .reduce((sum, a) => sum + a.durationSeconds / 60, 0);
       const strengthMinutes = choice.includeStrength ? 15 : 0;
       const available = Math.max(0, budget - reserved - strengthMinutes);
+      const longMinutes = long
+        ? Math.min(long.minutes.high, load.longMinutes, available)
+        : 0;
       const normal = Math.max(
         10,
-        Math.floor(available / (dates.length + (long ? 0.5 : 0))),
+        Math.floor(
+          (available - longMinutes) /
+            Math.max(1, dates.length - (long ? 1 : 0)),
+        ),
       );
       let used = 0;
       const weekSessions: PlanInput[] = [];
@@ -287,16 +303,10 @@ export class TrainingPrograms {
           : all.find((w) => w.intent === "rest");
         if (!example) continue;
         let minutes = training
-          ? Math.min(
-              example.minutes.high,
-              Math.round(normal * (example === long ? 1.5 : 1)),
-            )
+          ? example === long
+            ? longMinutes
+            : Math.min(example.minutes.high, normal)
           : 0;
-        if (
-          example.intent === "long" &&
-          ["run", "trail"].includes(example.sport)
-        )
-          minutes = Math.min(minutes, (query.longestMinutes ?? 0) + 20);
         minutes = Math.min(minutes, Math.max(0, available - used));
         if (training && minutes < 10) {
           example = all.find((w) => w.intent === "rest");
@@ -479,7 +489,7 @@ export class TrainingPrograms {
     });
   }
 }
-function toSession(
+export function toSession(
   example: ExampleWorkout,
   date: string,
   minutes: number,

@@ -77,6 +77,8 @@ export const athleteSchema = z.object({
     })
     .default({ pace: null, heartRate: null, ftp: null }),
   availableHours: z.number().min(0.5).max(60).nullable().default(null),
+  // When weeklyMinutes or longestRunMinutes was last stated. Set by the server.
+  backgroundDate: civilDate.nullable().default(null),
   readiness: z
     .object({
       date: civilDate,
@@ -88,11 +90,17 @@ export const athleteSchema = z.object({
     .default(null),
 });
 export const athletePatchSchema = athleteSchema
-  .omit({ id: true })
+  .omit({ id: true, backgroundDate: true })
   .partial()
   .extend({
+    // Zod fills defaults even for optional keys, so a patch would reset
+    // fields it never mentioned. Patch fields carry no defaults.
+    constraintRegion: athleteSchema.shape.constraintRegion.unwrap().optional(),
+    constraintDate: athleteSchema.shape.constraintDate.unwrap().optional(),
     zones: zonesSchema.partial().optional(),
     thresholds: athleteSchema.shape.thresholds.unwrap().partial().optional(),
+    availableHours: athleteSchema.shape.availableHours.unwrap().optional(),
+    readiness: athleteSchema.shape.readiness.unwrap().optional(),
   });
 export type Athlete = z.infer<typeof athleteSchema>;
 
@@ -262,6 +270,10 @@ export interface PlanBlock {
   phase: Phase;
   weeklyMinutes: number;
   longMinutes: number;
+  /** Easy second day after the long run in an ultra build, 0 when none. */
+  secondMinutes?: number;
+  /** Reference program that sets the destination. */
+  reference?: string | null;
   reason: string;
   cutback: boolean;
 }
@@ -418,5 +430,6 @@ export function formatElevation(metres: number, units: "mi" | "km"): string {
 }
 
 export * from "./programs.js";
+export * from "./baseline.js";
 export * from "./motivation.js";
 export type * from "./conversation.js";

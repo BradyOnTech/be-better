@@ -441,3 +441,28 @@ describe("HTTP and chat persistence", () => {
     expect(service.activities()).toHaveLength(0);
   });
 });
+
+describe("athlete updates", () => {
+  it("change only the fields they mention", () => {
+    const service = setup();
+    service.updateAthlete(
+      {
+        availableHours: 6,
+        constraint: "niggle",
+        constraintRegion: "left calf",
+        readiness: {
+          date: "2026-10-06",
+          sleep: "good",
+          soreness: "none",
+          mood: "",
+        },
+      },
+      "first",
+    );
+    service.updateAthlete({ longRunDay: 0 }, "second");
+    const athlete = service.athlete();
+    expect(athlete.availableHours).toBe(6);
+    expect(athlete.constraintRegion).toBe("left calf");
+    expect(athlete.readiness?.sleep).toBe("good");
+  });
+});

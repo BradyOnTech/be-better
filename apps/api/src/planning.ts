@@ -8,8 +8,15 @@ import {
   type PlanBlock,
   type PlanInput,
   type Race,
+  exampleWorkouts,
+  programLibrary,
+  programQueryFromContext,
+  retrievePrograms,
+  trainingBaseline,
 } from "../../../packages/domain/src/index.js";
 import type { CoachService } from "./service.js";
+import { progressWeeks, type WeekFrame } from "./progression.js";
+import { toSession } from "./training-programs.js";
 
 const daysBetween = (from: string, to: string) =>
   Math.round(
@@ -19,19 +26,6 @@ const daysBetween = (from: string, to: string) =>
 export function phaseFor(date: string, race: Race | null): Phase {
   return phaseForDate(date, race?.date ?? null);
 }
-// Conservative finish-goal peaks for a full build, in minutes per week and for
-// the longest single session. A shorter runway simply never reaches them.
-function peaks(race: Race | null) {
-  if (!race) return null;
-  const km = race.distanceMetres / 1000;
-  if (race.sport === "bike") return { weekly: 600, long: 240 };
-  if (km <= 10.5) return { weekly: 240, long: 75 };
-  if (km <= 21.5) return { weekly: 300, long: 120 };
-  if (km <= 42.5) return { weekly: 390, long: 180 };
-  if (km <= 60) return { weekly: 480, long: 240 };
-  if (km <= 100) return { weekly: 570, long: 300 };
-  return { weekly: 630, long: 360 };
-}
 // Minutes that count toward the race's training volume. Strength is recovery
 // context, not endurance volume, and cycling does not stand in for running.
 export function countsToward(race: Race | null) {
@@ -39,6 +33,32 @@ export function countsToward(race: Race | null) {
     race?.sport === "bike" ? ["bike"] : race ? ["run", "trail", "walk"] : null;
   return (sport: string) =>
     sports ? sports.includes(sport) : !["strength", "rest"].includes(sport);
+}
+// The reference program that matches the race supplies the destination: its
+// usual peak week and its longest example session.
+export function raceDestination(service: CoachService, race: Race) {
+  const query = programQueryFromContext({
+    today: service.today(),
+    athlete: service.athlete(),
+    activities: service.activities(),
+    block: null,
+    races: [race],
+  });
+  const pattern = programLibrary.find(
+    (p) =>
+      p.id === retrievePrograms({ ...query, phase: "build", limit: 1 })[0]?.id,
+  );
+  const longest = Math.max(
+    0,
+    ...(exampleWorkouts[pattern?.id ?? ""] ?? [])
+      .filter((w) => w.intent === "long" || /long/i.test(w.name))
+      .map((w) => w.minutes.high),
+  );
+  return {
+    pattern: pattern ?? null,
+    weeklyMinutes: pattern?.weeklyMinutes?.high ?? null,
+    longMinutes: longest || null,
+  };
 }
 export function buildBlocks(
   service: CoachService,
@@ -63,48 +83,19 @@ export function buildBlocks(
     null;
   const first = weekStart(today);
   const last = race ? weekStart(addDays(race.date, 7)) : addDays(first, 105);
-  const counts = countsToward(race);
-  const history = service.activities().filter((a) => counts(a.sport));
-  // Average over the weeks the log actually covers (up to four), so a new log
-  // with one week of training is not divided as if it held four.
-  const earliest = history.map((a) => a.date).sort()[0];
-  const weeksLogged = earliest
-    ? Math.min(
-        4,
-        Math.max(1, Math.ceil((daysBetween(earliest, today) + 1) / 7)),
-      )
-    : 0;
-  const base = Math.max(
-    20,
-    athlete.weeklyMinutes ??
-      (weeksLogged
-        ? Math.round(
-            history.reduce((sum, a) => sum + a.durationSeconds / 60, 0) /
-              weeksLogged,
-          )
-        : 120),
-  );
-  const available = athlete.availableHours
-    ? athlete.availableHours * 60
-    : Infinity;
-  const longest = Math.max(
-    athlete.longestRunMinutes ?? 0,
-    ...history
-      .filter((a) => race?.sport === "bike" || a.sport !== "bike")
-      .map((a) => a.durationSeconds / 60),
-  );
-  const peak = peaks(race);
-  // Without a race, consolidate rather than build toward a distance.
-  const peakWeekly = Math.min(
-    available,
-    Math.max(base, peak?.weekly ?? Math.round(base * 1.3)),
-  );
-  const peakLong = Math.max(longest, peak?.long ?? longest + 30);
-  const blocks: PlanBlock[] = [];
-  // The last full training week sets the reference for cutbacks and taper.
-  let level = base;
-  let long = longest;
-  let reached = base;
+  const baseline = trainingBaseline({
+    today,
+    athlete,
+    activities: service.activities(),
+    counts: countsToward(race),
+  });
+  const weekly = Math.max(20, baseline.weeklyMinutes ?? 120);
+  const longest =
+    race?.sport === "bike" ? 0 : (baseline.longestRunMinutes ?? 0);
+  const destination = race ? raceDestination(service, race) : null;
+  const ultra = !!race && race.sport !== "bike" && race.distanceMetres > 42195;
+  const frames: WeekFrame[] = [];
+  const dates: string[] = [];
   for (
     let date = first, index = 0;
     date <= last && index < 105;
@@ -114,60 +105,55 @@ export function buildBlocks(
       date <= today && today <= addDays(date, 6) ? today : date,
       race,
     );
-    const taper = phase === "taper" || phase === "recovery";
-    const cutback = !taper && index % 4 === 3;
-    const daysOut = race ? daysBetween(date, race.date) : Infinity;
-    let weeklyMinutes: number;
-    let longMinutes: number;
-    if (taper) {
-      const factor =
-        phase === "recovery"
-          ? 0.35
-          : daysOut <= 6
-            ? 0.4
-            : daysOut <= 13
-              ? 0.6
-              : 0.75;
-      weeklyMinutes = reached * factor;
-      longMinutes = 0;
-    } else if (cutback) {
-      weeklyMinutes = level * 0.8;
-      longMinutes = long * 0.75;
-    } else {
-      // Grow about 10% a week from the last full week, and the long session
-      // by ten minutes, until the race-specific peak.
-      level = Math.min(peakWeekly, index > 0 ? level * 1.1 : level);
-      long = Math.min(peakLong, long + 10);
-      weeklyMinutes = level;
-      longMinutes = long;
-      reached = level;
-    }
-    weeklyMinutes = Math.max(
-      20,
-      Math.floor(Math.min(available, weeklyMinutes) / 5) * 5,
-    );
-    if (longMinutes > 0)
-      longMinutes = Math.round(
-        Math.min(
-          longMinutes,
-          // Low-volume weeks can hold half their time in the long session;
-          // larger weeks keep it near 40%.
-          Math.max(weeklyMinutes * 0.42, Math.min(weeklyMinutes * 0.5, 90)),
-        ),
-      );
-    const block: PlanBlock = {
-      id: `${race?.id ?? "general"}:${date}`,
-      raceId: race?.id ?? null,
-      startDate: date,
-      endDate: addDays(date, 6),
+    frames.push({
       phase,
-      weeklyMinutes,
-      longMinutes,
-      cutback,
-      reason: `${phase === "taper" ? "Reduce volume while staying fresh" : phase === "recovery" ? "Recover after race day" : cutback ? "A cutback week, about 80% of the previous week" : index === 0 ? `Start from your recent ${Math.round(base)} minutes a week` : "Build about 10% from the previous full week"}${race ? ` for ${race.name} on ${race.date}` : ""}.`,
-    };
-    blocks.push(block);
+      cutback: phase !== "taper" && phase !== "recovery" && index % 4 === 3,
+      daysOut: race ? daysBetween(date, race.date) : Infinity,
+    });
+    dates.push(date);
   }
+  const loads = progressWeeks(frames, {
+    weeklyMinutes: weekly,
+    longestMinutes: longest,
+    // Without a race, consolidate rather than build toward a distance.
+    peakWeeklyMinutes:
+      destination?.weeklyMinutes ?? Math.round(weekly * (race ? 1.5 : 1.2)),
+    peakLongMinutes: destination?.longMinutes ?? longest + (race ? 60 : 20),
+    availableMinutes: athlete.availableHours
+      ? athlete.availableHours * 60
+      : undefined,
+    backToBack: ultra && race.distanceMetres > 60000,
+    ultra,
+  });
+  const reference = destination?.pattern?.title;
+  const blocks = frames.map((frame, index): PlanBlock => {
+    const load = loads[index];
+    const why =
+      frame.phase === "taper"
+        ? "Reduce volume while staying fresh"
+        : frame.phase === "recovery"
+          ? "Recover after race day"
+          : frame.cutback
+            ? "A cutback week, about 80% of the last full week"
+            : index === 0
+              ? `Start from your current ${weekly} minutes a week`
+              : reference
+                ? `Build toward the ${reference} peak of about ${destination?.weeklyMinutes} minutes a week`
+                : "Build gradually from the previous full week";
+    return {
+      id: `${race?.id ?? "general"}:${dates[index]}`,
+      raceId: race?.id ?? null,
+      startDate: dates[index],
+      endDate: addDays(dates[index], 6),
+      phase: frame.phase,
+      weeklyMinutes: load.weeklyMinutes,
+      longMinutes: load.longMinutes,
+      secondMinutes: load.secondMinutes,
+      reference: destination?.pattern?.id ?? null,
+      cutback: frame.cutback,
+      reason: `${why}${race ? ` for ${race.name} on ${race.date}` : ""}.`,
+    };
+  });
   return service.saveBlocks(blocks, operationId);
 }
 
@@ -188,17 +174,24 @@ export function trainingProposal(
   const today = service.today();
   const athlete = service.athlete();
   const history = service.activities();
-  const start = history.some((a) => a.date === today)
-    ? addDays(today, 1)
-    : today;
+  // Start tomorrow once today's training is logged or the day is mostly over.
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      hourCycle: "h23",
+      timeZone: athlete.timezone,
+    }).format(service.now()),
+  );
+  const start =
+    history.some((a) => a.date === today) || hour >= 16
+      ? addDays(today, 1)
+      : today;
   const end = addDays(start, days - 1);
   const existing = service.plan(addDays(weekStart(start), -7), addDays(end, 7));
-  const longest = Math.max(
-    athlete.longestRunMinutes ?? 0,
-    ...history
-      .filter((a) => ["run", "trail"].includes(a.sport))
-      .map((a) => a.durationSeconds / 60),
-  );
+  // Reported background counts alongside the log.
+  const longest =
+    trainingBaseline({ today, athlete, activities: history })
+      .longestRunMinutes ?? 0;
   const ready =
     athlete.readiness &&
     daysBetween(athlete.readiness.date, today) <= 2 &&
@@ -215,8 +208,6 @@ export function trainingProposal(
     const block = service.blockFor(week < start ? start : week);
     const race = service.races().find((race) => race.id === block?.raceId);
     const counts = countsToward(race ?? null);
-    const ultra =
-      !!race && race.sport !== "bike" && race.distanceMetres > 42195;
     const taper = block?.phase === "taper" || block?.phase === "recovery";
     const budget = block?.weeklyMinutes ?? 120;
     // Training already done or accepted this week comes out of the budget.
@@ -233,8 +224,10 @@ export function trainingProposal(
     const open = upcoming.filter((date) => date <= end);
     if (!open.length) continue;
     const longDay = dates.find((d) => dayOfWeek(d) === athlete.longRunDay)!;
+    // The block keeps a shortened long run early in the taper, none in the
+    // final week.
     const long =
-      !taper &&
+      (block ? block.longMinutes > 0 : !taper) &&
       athlete.constraint === "none" &&
       longest > 0 &&
       race?.sport !== "bike" &&
@@ -243,17 +236,14 @@ export function trainingProposal(
     const longTarget = long
       ? Math.min(block?.longMinutes ?? longest + 10, longest + 20)
       : 0;
-    // Ultra back-to-backs start once the long run is substantial, in the
-    // build and race-specific phases.
+    // The block decides which ultra weeks pair the long run with an easy day.
     const secondDay = addDays(longDay, 1);
     const backToBack =
-      ultra &&
       long &&
-      ["build", "specific"].includes(block?.phase ?? "") &&
-      longTarget >= 90 &&
+      (block?.secondMinutes ?? 0) > 0 &&
       weekStart(secondDay) === week &&
       free(secondDay);
-    const runDays = budget < 120 ? 3 : budget < 200 ? 4 : budget < 300 ? 5 : 6;
+    const runDays = budget < 150 ? 3 : budget < 240 ? 4 : budget < 330 ? 5 : 6;
     const candidates = [
       ...(long ? [] : [longDay]),
       ...easyOffsets.map(
@@ -281,7 +271,9 @@ export function trainingProposal(
     }
     let secondMinutes = 0;
     if (backToBack && longMinutes && upcoming.includes(secondDay)) {
-      secondMinutes = round5(Math.min(longMinutes * 0.5, remaining));
+      secondMinutes = round5(
+        Math.min(block?.secondMinutes ?? 0, longMinutes * 0.75, remaining),
+      );
       if (secondMinutes < 20) secondMinutes = 0;
       remaining -= secondMinutes;
     }
@@ -292,7 +284,20 @@ export function trainingProposal(
       if (easyMinutes >= 20) break;
       easyDays = easyDays.slice(0, -1);
     }
-    if (longMinutes) easyMinutes = Math.min(easyMinutes, longMinutes);
+    // A short remainder of a week is not a reason for one big easy day.
+    const easyExample = (exampleWorkouts[block?.reference ?? ""] ?? []).find(
+      (w) => w.intent === "easy",
+    );
+    easyMinutes = round5(
+      Math.min(
+        easyMinutes,
+        Math.max(30, 0.75 * (longTarget || longest)),
+        easyExample?.minutes.high ?? Infinity,
+      ),
+    );
+    const reference =
+      programLibrary.find((p) => p.id === block?.reference) ?? null;
+    const examples = reference ? (exampleWorkouts[reference.id] ?? []) : [];
     let qualityUsed = false;
     for (const date of open) {
       const weekday = dayOfWeek(date);
@@ -360,6 +365,43 @@ export function trainingProposal(
             ? "Keep it easy at RPE 3. This is time on feet after the long day, not another hard session."
             : "Keep it conversational at RPE 3. Walk breaks are fine. Ease off or stop if anything hurts.";
       const stepSeconds = duration * 60;
+      const reason =
+        intent === "back-to-back"
+          ? `An easy second day after the ${longMinutes}-minute long run, building ultra time on feet. ${race?.terrainNotes ?? ""}`.trim()
+          : intent === "long"
+            ? `Builds from your recent longest run of ${Math.round(longest)} minutes. ${block?.reason ?? ""}`.trim()
+            : rest
+              ? `A ${budget}-minute week leaves room to recover between runs.`
+              : (block?.reason ?? "Keep the week manageable.");
+      // Prescribe from the reference program's own session when it has one.
+      const example =
+        examples.find(
+          (w) =>
+            (intent === "quality"
+              ? ["quality", "hills"].includes(w.intent)
+              : w.intent === intent) &&
+            (!block || w.phases.includes(block.phase)),
+        ) ??
+        (intent === "quality"
+          ? undefined
+          : examples.find((w) => w.intent === intent));
+      if (example && reference) {
+        output.push({
+          ...toSession(
+            example,
+            date,
+            duration,
+            reference.title,
+            1,
+            block?.phase ?? "base",
+            !!block?.cutback,
+          ),
+          reason: `${reference.title}: ${reason}`,
+          blockId: block?.id ?? null,
+          linkedDate: intent === "back-to-back" ? longDay : null,
+        });
+        continue;
+      }
       output.push({
         date,
         sport,
@@ -368,14 +410,7 @@ export function trainingProposal(
         rpeTarget: rest ? 0 : intent === "quality" ? 7 : 3,
         title,
         prescription,
-        reason:
-          intent === "back-to-back"
-            ? `An easy second day after the ${longMinutes}-minute long run, building ultra time on feet. ${race?.terrainNotes ?? ""}`.trim()
-            : intent === "long"
-              ? `Builds from your recent longest run of ${Math.round(longest)} minutes. ${block?.reason ?? ""}`.trim()
-              : rest
-                ? `A ${budget}-minute week leaves room to recover between runs.`
-                : (block?.reason ?? "Keep the week manageable."),
+        reason,
         blockId: block?.id ?? null,
         linkedDate: intent === "back-to-back" ? longDay : null,
         steps: rest

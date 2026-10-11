@@ -12,6 +12,10 @@ _Avoid_: Active program, calendar
 The athlete's chosen training direction over a dated block, with a weekly commitment and a schedule they explicitly choose to follow.
 _Avoid_: Workout library, program pattern
 
+**Training baseline**:
+The athlete's current training level that plans start from: usual weekly minutes and recent longest run. It is the higher of what the athlete has stated and what the log shows. A stated number older than six weeks gives way to a log covering two or more weeks.
+_Avoid_: Logged history, fitness score
+
 **Planned session**:
 A dated prescription describing what the athlete intends to do and why.
 _Avoid_: Completed activity

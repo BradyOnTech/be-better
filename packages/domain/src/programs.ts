@@ -1,6 +1,7 @@
 // Original descriptions of how public training programs are structured, plus
 // original example sessions from ./workouts.ts. Published day-by-day plans are
 // not stored. See docs/research/program-library.md.
+import { trainingBaseline } from "./baseline.js";
 import {
   chooseWorkouts,
   describeWorkout,
@@ -786,6 +787,7 @@ export interface ProgramContextInput {
   athlete: {
     weeklyMinutes: number | null;
     longestRunMinutes: number | null;
+    backgroundDate?: string | null;
     constraint: "none" | "niggle" | "injury" | "travel";
   };
   block: { phase: TrainingPhase; cutback: boolean } | null;
@@ -829,7 +831,7 @@ const runEvents = new Set<ProgramEvent>([
 export function situationLines(query: ProgramQuery): string[] {
   const lines = [
     COPYRIGHT,
-    "Use an example for the kind of week and for how to change it. Name the example when it shapes a proposal. The athlete's log decides the numbers.",
+    "Use an example for the kind of week, how it progresses, and how to change it. Name the example when it shapes a proposal. The athlete's current training, stated or logged, sets the starting numbers; the example sets the destination.",
   ];
   if (query.constraint === "injury")
     lines.push(
@@ -858,11 +860,11 @@ export function situationLines(query: ProgramQuery): string[] {
   if (query.event && runEvents.has(query.event)) {
     if (query.longestMinutes)
       lines.push(
-        `The recent longest run is about ${query.longestMinutes} minutes. A long run this week stays within 20 minutes of that. A published peak is a destination, not this week.`,
+        `The recent longest run, stated or logged, is about ${query.longestMinutes} minutes. Each long run stays within 20 minutes of the longest one before it. A published peak is where the block ends up, not this week.`,
       );
     else
       lines.push(
-        "No recent longest run is on file. Ask for it before adding a long run.",
+        "No recent longest run is on file. Ask for it, or estimate it from what the athlete describes and save it, before adding a long run.",
       );
     lines.push(
       "The day after a long session is easy or rest. At most two hard days in a week, and never on adjacent days.",
@@ -878,7 +880,7 @@ export function situationLines(query: ProgramQuery): string[] {
     );
   if (query.weeklyMinutes == null && query.longestMinutes == null)
     lines.push(
-      "History is thin. Ask for a usual weekly volume, a recent longest session, and whether there is a race date before writing a specific week.",
+      "No training background is on file. Ask once for usual weekly volume and a recent longest session. If the athlete wants a plan now, build from stated conservative assumptions.",
     );
   return lines;
 }
@@ -1120,36 +1122,14 @@ export function programQueryFromContext(
       activity.date <= today &&
       activity.date >= shiftDate(today, -27),
   );
-  const loggedMinutes = logged.reduce(
-    (sum, activity) => sum + activity.durationSeconds / 60,
-    0,
-  );
-  const coverageDays = logged.length
-    ? Math.min(
-        28,
-        Math.floor(
-          (Date.parse(today) -
-            Math.min(...logged.map((a) => Date.parse(a.date)))) /
-            86400000,
-        ) + 1,
-      )
-    : 0;
-  // A few entries in a newly started log do not establish four weeks of volume.
-  const weeklyMinutes =
-    logged.length >= 3 &&
-    (coverageDays >= 14 || input.athlete.weeklyMinutes == null)
-      ? Math.round(loggedMinutes / Math.max(1, coverageDays / 7))
-      : input.athlete.weeklyMinutes;
-  const runMinutes = logged
-    .filter(
-      (activity) => activity.sport === "run" || activity.sport === "trail",
-    )
-    .map((activity) => Math.round(activity.durationSeconds / 60));
-  const longestMinutes = Math.max(
-    input.athlete.longestRunMinutes ?? 0,
-    ...runMinutes,
-    0,
-  );
+  // Reported background and the log both count; the higher one is the level.
+  const baseline = trainingBaseline({
+    today,
+    athlete: input.athlete,
+    activities: input.activities,
+  });
+  const weeklyMinutes = baseline.weeklyMinutes;
+  const longestMinutes = baseline.longestRunMinutes ?? 0;
   const sports = race
     ? [race.sport === "bike" ? "bike" : race.sport]
     : logged.length

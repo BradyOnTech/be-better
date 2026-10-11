@@ -272,6 +272,12 @@ export class CoachService {
         ...(patch.constraint && patch.constraint !== before.constraint
           ? { constraintDate: this.today() }
           : {}),
+        ...((patch.weeklyMinutes !== undefined &&
+          patch.weeklyMinutes !== before.weeklyMinutes) ||
+        (patch.longestRunMinutes !== undefined &&
+          patch.longestRunMinutes !== before.longestRunMinutes)
+          ? { backgroundDate: this.today() }
+          : {}),
       });
       if (
         Object.values(after.thresholds).some(

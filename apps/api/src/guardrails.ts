@@ -231,9 +231,20 @@ export function validatePlan(
           activity.date >= addDays(today, -27) &&
           activity.date <= today,
       );
+      // A later long run builds from the long runs planned in the two weeks
+      // before it, so a progression is allowed one step at a time.
+      const planned = schedule.filter(
+        (other) =>
+          other !== session &&
+          other.intent === "long" &&
+          ["run", "trail"].includes(other.sport) &&
+          other.date < session.date &&
+          other.date >= addDays(session.date, -14),
+      );
       const baseline = Math.max(
         athlete.longestRunMinutes ? athlete.longestRunMinutes * 60 : 0,
         ...history.map((activity) => activity.durationSeconds),
+        ...planned.map((other) => other.durationSeconds),
       );
       if (!baseline)
         throw new DomainError(
@@ -243,7 +254,7 @@ export function validatePlan(
       if (session.durationSeconds > baseline + 1200)
         throw new DomainError(
           "LONG_RUN",
-          "Keep the long run within 20 minutes of your recent longest run.",
+          `Keep the long run within 20 minutes of the longest recent or planned run before it (${Math.round(baseline / 60)} minutes).`,
         );
     }
   }

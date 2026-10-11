@@ -4,7 +4,9 @@ How the app behaves, screen by screen. For installation, see [self-hosting](self
 
 ## Coach
 
-The home screen is a conversation. The coach reads your log, asks about gaps that matter (pain, readiness, a race date, a missed session), and proposes dated sessions, each with a target and a reason. It shows at most two questions at once, prioritizing injury, readiness, races, effort, and missed sessions.
+The home screen is a conversation. The coach reads your log and what you tell it about your training, then acts on what you ask: when you ask for a plan, it builds one in that reply, says what it assumed, and asks at most one follow-up question. Training you describe ("about 15 miles a week", "5–6 miles is comfortable") is saved to **Settings → Training** as your usual weekly minutes and recent longest run, using an easy pace of about 11 minutes per mile unless you give one, so plans start from your real level rather than only what has been logged in the app.
+
+For a race, the coach builds a block from your current level toward the peak week and long run of the reference program that matches the race (for example, First 50K for a 34-mile trail race), with an easier week every fourth week and a three-week taper, then proposes the first days. It tells you the whole arc and the reference it used. Pain always comes first.
 
 Use **New conversation** to start a fresh topic and **Conversations** to return to an earlier chat. On a phone, both are icons in the Coach header, next to the current conversation's title. Each conversation keeps its own messages; your training log, plan, preferences, and saved coaching notes stay available across chats. The app reopens the conversation you last selected on that device. Messages from before this feature remain under **Earlier conversation**. Offline reopening keeps the last saved conversation; starting or opening another chat requires a connection.
 
@@ -24,7 +26,7 @@ The **Next workout** card at the top of My week opens the earliest upcoming work
 
 Existing accepted or proposed sessions stay in place. End the program explicitly before switching. Ending cancels only its remaining scheduled days and preserves completed training and decision notes.
 
-Schedules start from your current training, stay within the time budget and guardrails, and include cutbacks and a taper when you give a goal date. Long runs are capped by your actual recent baseline. A scaled starting block does not establish readiness for an ambitious race.
+Schedules start from your current training and build about 10% a week, with an easier week every fourth week, toward your weekly time commitment. They include a taper when you give a goal date. Long runs grow by at most about 15 minutes a week, and never more than 20 minutes past the longest run before them. Your current training is the higher of what you have told the app (**Settings → Training**, or the coach) and what you have logged, so training from before you started using the app counts.
 
 **Workout library** is a secondary tab with 70 original example sessions, which the coach also uses as references. **For you** highlights sessions for the active program. Browsing and filtering never change the plan.
 
@@ -54,7 +56,7 @@ Every write, whether from the UI or the model, goes through the same checks. The
 - more than two hard days in a week
 - hard training during an injury flag
 - training on a stated rest day
-- long-run jumps over 20 minutes
+- long-run jumps of more than 20 minutes past the longest recent or planned run in the two weeks before
 - weeks that break cutback or taper budgets
 - numeric targets without saved zones
 

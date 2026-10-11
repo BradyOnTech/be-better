@@ -105,7 +105,14 @@ describe("program examples in the coach", () => {
     );
     expect(() =>
       taper.proposePlan(
-        [session({ date: "2026-10-09", intent: "long", durationSeconds: 3600, rpeTarget: 4 })],
+        [
+          session({
+            date: "2026-10-09",
+            intent: "long",
+            durationSeconds: 3600,
+            rpeTarget: 4,
+          }),
+        ],
         "race-week-long",
       ),
     ).toThrow(/final week/i);
@@ -186,5 +193,86 @@ describe("program examples in the coach", () => {
     expect(prompt).toContain("Long easy run");
     expect(prompt).toContain("About 60 minutes");
     expect(prompt).toContain("Steps:");
+  });
+
+  it("does not clear saved settings the coach did not mention", async () => {
+    const service = setup();
+    service.mode = { mode: "model", model: "test-model" };
+    service.updateAthlete(
+      {
+        availableHours: 6,
+        readiness: {
+          date: service.today(),
+          sleep: "good",
+          soreness: "none",
+          mood: "",
+        },
+      },
+      "saved",
+    );
+    expect(service.athlete().availableHours).toBe(6);
+    const usage = {
+      inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 10, text: 10, reasoning: 0 },
+    };
+    const finish = (unified: "stop" | "tool-calls") => ({
+      type: "finish" as const,
+      finishReason: { unified, raw: undefined },
+      usage,
+    });
+    const model = new MockLanguageModelV4({
+      doStream: [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "background",
+                toolName: "update_athlete",
+                input: JSON.stringify({
+                  weeklyMinutes: 210,
+                  availableHours: null,
+                  readiness: null,
+                  constraintDate: null,
+                }),
+              },
+              finish("tool-calls"),
+            ],
+            chunkDelayInMs: 0,
+          }),
+        },
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "answer" },
+              { type: "text-delta", id: "answer", delta: "Saved." },
+              { type: "text-end", id: "answer" },
+              finish("stop"),
+            ],
+            chunkDelayInMs: 0,
+          }),
+        },
+      ],
+    });
+    const streamed = await streamCoach(
+      service,
+      [
+        {
+          id: "ask",
+          role: "user",
+          parts: [{ type: "text", text: "I run about 210 minutes a week." }],
+        },
+      ],
+      "turn-background",
+      model,
+    );
+    if (!("text" in streamed)) throw new Error("Expected the model stream.");
+    await streamed.text;
+    const athlete = service.athlete();
+    expect(athlete.weeklyMinutes).toBe(210);
+    expect(athlete.availableHours).toBe(6);
+    expect(athlete.readiness?.sleep).toBe("good");
   });
 });
