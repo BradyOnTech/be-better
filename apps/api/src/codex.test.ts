@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { tool } from "ai";
+import { z } from "zod";
 import { CodexConnection } from "./codex.js";
 
 const connections: CodexConnection[] = [];
@@ -73,5 +75,49 @@ describe("subscription coach web access", () => {
       approvalPolicy: "never",
       permissions: "be_better",
     });
+  });
+});
+
+describe("subscription coach tool calls", () => {
+  it("records refused arguments with the fields to fix", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "be-better-tools-"));
+    folders.push(folder);
+    vi.stubEnv("CODEX_BINARY", resolve("scripts/codex-app-fixture.mjs"));
+    vi.stubEnv("CODEX_WORKSPACE", join(folder, "workspace"));
+    vi.stubEnv("BE_BETTER_CODEX_HOME", join(folder, "home"));
+    const connection = new CodexConnection();
+    connections.push(connection);
+    let executed = false;
+    const { stream } = connection.stream(
+      "You are an endurance coach.",
+      JSON.stringify([
+        { role: "user", parts: [{ type: "text", text: "invalid revision" }] },
+      ]),
+      {
+        revise_session: tool({
+          inputSchema: z.object({ id: z.string(), version: z.number().int() }),
+          execute: async () => {
+            executed = true;
+            return { ok: true };
+          },
+        }),
+      },
+    );
+    const parts: { type: string; output?: unknown; text?: string }[] = [];
+    const reader = stream.getReader();
+    for (let next = await reader.read(); !next.done; next = await reader.read())
+      parts.push(next.value as (typeof parts)[number]);
+    expect(executed).toBe(false);
+    expect(parts.find((part) => part.type === "tool-call")).toBeTruthy();
+    const result = parts.find((part) => part.type === "tool-result")
+      ?.output as { ok: boolean; code: string; reason: string };
+    expect(result).toMatchObject({ ok: false, code: "VALIDATION" });
+    expect(result.reason).toContain("version");
+    expect(
+      parts
+        .filter((part) => part.type === "text-delta")
+        .map((part) => part.text)
+        .join(""),
+    ).toContain("version");
   });
 });

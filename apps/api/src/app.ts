@@ -262,7 +262,7 @@ export function createApp(
     const proposal = trainingProposal(service, days, operationId);
     return c.json(
       proposal.length
-        ? service.proposePlan(proposal, `${operationId}:proposal`)
+        ? service.proposeWeek(proposal, `${operationId}:proposal`)
         : [],
     );
   });

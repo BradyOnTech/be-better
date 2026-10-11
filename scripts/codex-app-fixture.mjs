@@ -170,6 +170,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           feel: "comfortable",
           pain: null,
         };
+      } else if (/invalid revision/i.test(message)) {
+        tool = "revise_session";
+        args = { id: "session", version: "one" };
       } else if (/plan|next.*days/i.test(message)) {
         tool = "propose_training_week";
         args = {

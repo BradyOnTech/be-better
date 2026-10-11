@@ -500,18 +500,39 @@ export class CodexConnection {
               }
             },
             execute: async (name, args, id) => {
-              if (++calls > 8)
-                throw new DomainError(
+              // Refusals are recorded in the conversation like any other
+              // result, and say what to fix so the coach can retry.
+              const refuse = (code: string, reason: string) => {
+                const output = { ok: false, code, reason };
+                emit({
+                  type: "tool-call",
+                  toolCallId: id,
+                  toolName: name,
+                  input: args,
+                  dynamic: true,
+                });
+                emit({
+                  type: "tool-result",
+                  toolCallId: id,
+                  toolName: name,
+                  input: args,
+                  output,
+                  dynamic: true,
+                });
+                return output;
+              };
+              if (++calls > toolLimit)
+                return refuse(
                   "TOOL_LIMIT",
-                  "Keep this turn to a few focused changes.",
+                  `This turn has used its ${toolLimit} tool calls. Tell the athlete what was saved and what is left, and continue in the next message.`,
                 );
               const definition = tools[name];
               const schema = asSchema(definition.inputSchema);
               const checked = await schema.validate?.(args);
               if (checked && !checked.success)
-                throw new DomainError(
+                return refuse(
                   "VALIDATION",
-                  "The coach supplied invalid tool arguments.",
+                  `Invalid ${name} arguments: ${describeInvalid(checked.error)}. Correct these fields and call ${name} again.`,
                 );
               const input = checked?.success ? checked.value : args;
               emit({
@@ -521,11 +542,27 @@ export class CodexConnection {
                 input,
                 dynamic: true,
               });
-              const output = await definition.execute!(input, {
-                toolCallId: id,
-                messages: [],
-                context: {},
-              });
+              let output: unknown;
+              try {
+                output = await definition.execute!(input, {
+                  toolCallId: id,
+                  messages: [],
+                  context: {},
+                });
+              } catch (error) {
+                if (!(error instanceof DomainError) && !isZodError(error))
+                  console.error(`Coach tool ${name} failed`, error);
+                output = {
+                  ok: false,
+                  code: error instanceof DomainError ? error.code : "ERROR",
+                  reason:
+                    error instanceof DomainError
+                      ? error.message
+                      : isZodError(error)
+                        ? `Invalid ${name} arguments: ${describeInvalid(error)}.`
+                        : "This change could not be saved.",
+                };
+              }
               emit({
                 type: "tool-result",
                 toolCallId: id,
@@ -560,5 +597,25 @@ export class CodexConnection {
       }),
     };
   }
+}
+// A tailored week can take a dozen writes: a skeleton, then revisions.
+const toolLimit = 16;
+const isZodError = (error: unknown) =>
+  error instanceof Error && error.name === "ZodError";
+function describeInvalid(error: unknown) {
+  const issues =
+    (error as { issues?: { path: PropertyKey[]; message: string }[] })
+      ?.issues ?? [];
+  return issues.length
+    ? issues
+        .slice(0, 6)
+        .map(
+          (issue) =>
+            `${issue.path.map(String).join(".") || "input"}: ${issue.message}`,
+        )
+        .join("; ")
+    : error instanceof Error
+      ? error.message
+      : "the arguments do not match the tool schema";
 }
 export const subscription = new CodexConnection();

@@ -1504,6 +1504,7 @@ function ToolActivity() {
     propose_plan: "Plan proposed",
     revise_session: "Plan adjusted",
     skip_session: "Missed session recorded",
+    discard_proposal: "Proposal removed",
     record_note: "Note saved",
     get_training_context: "Training checked",
     get_training_analysis: "Intervals analysis checked",

@@ -603,6 +603,34 @@ export class CoachService {
       return sessions;
     });
   }
+  // A regenerated week replaces earlier unaccepted endurance proposals on the
+  // same dates, even when the sport changes (a trail day that becomes rest).
+  // Strength proposals and accepted sessions are left alone.
+  proposeWeek(raw: unknown, operationId: string): PlanSession[] {
+    const request = z.array(planInputSchema).min(1).max(14).parse(raw);
+    return this.mutate(operationId, request, () => {
+      const dates = new Set(request.map((day) => day.date));
+      const stale = this.plan(
+        [...dates].sort()[0],
+        [...dates].sort().at(-1)!,
+      ).filter(
+        (session) =>
+          session.status === "proposed" &&
+          session.sport !== "strength" &&
+          dates.has(session.date) &&
+          !request.some(
+            (day) => day.date === session.date && day.sport === session.sport,
+          ),
+      );
+      for (const session of stale)
+        this.discardProposal(
+          session.id,
+          session.version,
+          `${operationId}:discard:${session.id}`,
+        );
+      return this.proposePlan(request, `${operationId}:proposal`);
+    });
+  }
   acceptPlan(ids: string[], operationId: string): PlanSession[] {
     return this.mutate(operationId, { ids }, () => {
       const sessions = ids.map((id) => this.session(id));

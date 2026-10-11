@@ -141,10 +141,10 @@ export function validatePlan(
       const actual = performed.filter(
         (other) => weekStart(other.date) === weekStart(session.date),
       );
-      const volume = [...week, ...actual].reduce(
-        (sum, other) => sum + other.durationSeconds / 60,
-        0,
-      );
+      // Blocks budget endurance time; strength is recovery context.
+      const volume = [...week, ...actual]
+        .filter((other) => other.sport !== "strength")
+        .reduce((sum, other) => sum + other.durationSeconds / 60, 0);
       if (volume > block.weeklyMinutes + 1 && session.durationSeconds > 0)
         throw new DomainError(
           block.cutback ? "CUTBACK" : "TAPER",
